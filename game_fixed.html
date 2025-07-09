@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GTA7 v0.5 – WASM Version</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; }
+    canvas { display: block; }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+    }
+    #crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 20px;
+      color: white;
+      pointer-events: none;
+      z-index: 100;
+    }
+    #loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-family: sans-serif;
+      font-size: 24px;
+      z-index: 100;
+    }
+    #debug {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: white;
+      font-family: monospace;
+      font-size: 12px;
+      background: rgba(0,0,0,0.7);
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">Loading WASM...</div>
+  <div id="hud" style="display: none;">Mode: On Foot | Score: 0</div>
+  <div id="crosshair" style="display: none;">+</div>
+  <div id="debug" style="display: none;">Debug Info</div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    let scene, camera, renderer, hud, debug;
+    let player, car, ground;
+    let enemies = [];
+    let bullets = [];
+    let mouseDown = false;
+    let gameRunning = false;
+    
+    // WASM module configuration
+    let Module = {
+      onRuntimeInitialized: function() {
+        console.log('WASM Runtime initialized');
+        debug.innerHTML = 'WASM Runtime initialized';
+        try {
+          if (typeof Module._initGame === 'function') {
+            initializeGame();
+          } else {
+            throw new Error('WASM functions not found');
+          }
+        } catch (error) {
+          console.error('Error initializing game:', error);
+          document.getElementById('loading').innerText = 'Error: ' + error.message;
+        }
+      },
+      onAbort: function(what) {
+        console.error('WASM aborted:', what);
+        document.getElementById('loading').innerText = 'WASM failed: ' + what;
+      },
+      print: function(text) {
+        console.log('WASM:', text);
+      },
+      printErr: function(text) {
+        console.error('WASM Error:', text);
+      }
+    };
+    
+    function initializeGame() {
+      console.log('Initializing game...');
+      
+      // Hide loading, show game elements
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('hud').style.display = 'block';
+      document.getElementById('crosshair').style.display = 'block';
+      document.getElementById('debug').style.display = 'block';
+      
+      hud = document.getElementById("hud");
+      debug = document.getElementById("debug");
+      
+      // Initialize Three.js
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x222222);
+      
+      camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.appendChild(renderer.domElement);
+      
+      // Lights
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+      scene.add(hemi);
+      
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+      dirLight.position.set(10, 20, 10);
+      dirLight.castShadow = true;
+      dirLight.shadow.mapSize.width = 2048;
+      dirLight.shadow.mapSize.height = 2048;
+      scene.add(dirLight);
+      
+      // Ground
+      ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(1000, 1000),
+        new THREE.MeshStandardMaterial({ color: 0x444444 })
+      );
+      ground.rotation.x = -Math.PI / 2;
+      ground.receiveShadow = true;
+      scene.add(ground);
+      
+      // Player
+      player = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 2, 1),
+        new THREE.MeshStandardMaterial({ color: 0xffff00 })
+      );
+      player.position.y = 1;
+      player.castShadow = true;
+      scene.add(player);
+      
+      // Car
+      car = new THREE.Mesh(
+        new THREE.BoxGeometry(3, 1.5, 5),
+        new THREE.MeshStandardMaterial({ color: 0x00aaff })
+      );
+      car.position.set(10, 0.75, 0);
+      car.castShadow = true;
+      scene.add(car);
+      
+      // Initialize WASM game
+      try {
+        Module._initGame();
+        console.log('WASM game initialized');
+        debug.innerHTML = 'WASM game initialized';
+      } catch (error) {
+        console.error('Error initializing WASM game:', error);
+        document.getElementById('loading').innerText = 'Error: ' + error.message;
+        return;
+      }
+      
+      // Setup event listeners
+      setupEventListeners();
+      
+      // Set initial camera position
+      camera.position.set(0, 10, 10);
+      camera.lookAt(0, 0, 0);
+      
+      // Start game loop
+      gameRunning = true;
+      animate();
+    }
+    
+    function setupEventListeners() {
+      // Mouse controls
+      document.addEventListener("mousedown", () => mouseDown = true);
+      document.addEventListener("mouseup", () => mouseDown = false);
+      document.addEventListener("mousemove", (e) => {
+        if (mouseDown && gameRunning) {
+          try {
+            Module._updateCamera(e.movementX, e.movementY, 0);
+          } catch (error) {
+            console.error('Error updating camera:', error);
+          }
+        }
+      });
+      document.addEventListener("wheel", (e) => {
+        if (gameRunning) {
+          try {
+            Module._updateCamera(0, 0, e.deltaY);
+          } catch (error) {
+            console.error('Error updating camera zoom:', error);
+          }
+        }
+      });
+      
+      // Keyboard controls
+      document.addEventListener("keydown", (e) => {
+        if (gameRunning) {
+          try {
+            Module._setKey(e.key.toLowerCase().charCodeAt(0), 1);
+          } catch (error) {
+            console.error('Error setting key:', error);
+          }
+        }
+      });
+      document.addEventListener("keyup", (e) => {
+        if (gameRunning) {
+          try {
+            Module._setKey(e.key.toLowerCase().charCodeAt(0), 0);
+          } catch (error) {
+            console.error('Error releasing key:', error);
+          }
+        }
+      });
+      
+      // Shooting
+      document.addEventListener("click", () => {
+        if (gameRunning) {
+          try {
+            Module._shoot();
+          } catch (error) {
+            console.error('Error shooting:', error);
+          }
+        }
+      });
+      
+      // Prevent context menu
+      document.addEventListener("contextmenu", (e) => e.preventDefault());
+    }
+    
+    function updateGameObjects() {
+      if (!gameRunning) return;
+      
+      try {
+        // Update player position
+        player.position.x = Module._getPlayerX();
+        player.position.y = Module._getPlayerY();
+        player.position.z = Module._getPlayerZ();
+        
+        // Update car position
+        car.position.x = Module._getCarX();
+        car.position.y = Module._getCarY();
+        car.position.z = Module._getCarZ();
+        
+        // Update enemies
+        const enemyCount = Module._getEnemyCount();
+        
+        // Remove excess enemies
+        while (enemies.length > enemyCount) {
+          scene.remove(enemies.pop());
+        }
+        
+        // Add missing enemies
+        while (enemies.length < enemyCount) {
+          const enemy = new THREE.Mesh(
+            new THREE.BoxGeometry(1, 2, 1),
+            new THREE.MeshStandardMaterial({ color: 0xff0000 })
+          );
+          enemy.castShadow = true;
+          scene.add(enemy);
+          enemies.push(enemy);
+        }
+        
+        // Update enemy positions
+        for (let i = 0; i < enemyCount; i++) {
+          enemies[i].position.x = Module._getEnemyX(i);
+          enemies[i].position.y = Module._getEnemyY(i);
+          enemies[i].position.z = Module._getEnemyZ(i);
+        }
+        
+        // Update bullets
+        const bulletCount = Module._getBulletCount();
+        
+        // Remove excess bullets
+        while (bullets.length > bulletCount) {
+          scene.remove(bullets.pop());
+        }
+        
+        // Add missing bullets
+        while (bullets.length < bulletCount) {
+          const bullet = new THREE.Mesh(
+            new THREE.SphereGeometry(0.1, 6, 6),
+            new THREE.MeshStandardMaterial({ color: 0xffffff })
+          );
+          scene.add(bullet);
+          bullets.push(bullet);
+        }
+        
+        // Update bullet positions
+        for (let i = 0; i < bulletCount; i++) {
+          bullets[i].position.x = Module._getBulletX(i);
+          bullets[i].position.y = Module._getBulletY(i);
+          bullets[i].position.z = Module._getBulletZ(i);
+        }
+      } catch (error) {
+        console.error('Error updating game objects:', error);
+      }
+    }
+    
+    function updateCamera() {
+      if (!gameRunning) return;
+      
+      try {
+        const inCar = Module._getInCar();
+        const target = inCar ? car : player;
+        const camAngleH = Module._getCamAngleH();
+        const camAngleV = Module._getCamAngleV();
+        const camDist = Module._getCamDist();
+        
+        const offset = new THREE.Vector3(
+          Math.sin(camAngleH) * camDist * Math.cos(camAngleV),
+          Math.sin(camAngleV) * camDist + 2,
+          Math.cos(camAngleH) * camDist * Math.cos(camAngleV)
+        );
+        
+        camera.position.copy(target.position.clone().add(offset));
+        camera.lookAt(target.position);
+      } catch (error) {
+        console.error('Error updating camera:', error);
+      }
+    }
+    
+    function updateHUD() {
+      if (!gameRunning) return;
+      
+      try {
+        const inCar = Module._getInCar();
+        const score = Module._getScore();
+        hud.innerText = `Mode: ${inCar ? "In Car" : "On Foot"} | Score: ${score}`;
+        
+        // Update debug info
+        debug.innerHTML = `
+          Player: ${Module._getPlayerX().toFixed(1)}, ${Module._getPlayerY().toFixed(1)}, ${Module._getPlayerZ().toFixed(1)}<br>
+          Car: ${Module._getCarX().toFixed(1)}, ${Module._getCarY().toFixed(1)}, ${Module._getCarZ().toFixed(1)}<br>
+          Enemies: ${Module._getEnemyCount()}<br>
+          Bullets: ${Module._getBulletCount()}<br>
+          In Car: ${inCar ? 'Yes' : 'No'}
+        `;
+      } catch (error) {
+        console.error('Error updating HUD:', error);
+      }
+    }
+    
+    function animate() {
+      if (!gameRunning) return;
+      
+      requestAnimationFrame(animate);
+      
+      try {
+        // Update WASM game logic
+        Module._updateGame();
+        
+        // Update Three.js objects
+        updateGameObjects();
+        updateCamera();
+        updateHUD();
+        
+        // Render
+        renderer.render(scene, camera);
+      } catch (error) {
+        console.error('Error in animation loop:', error);
+        gameRunning = false;
+      }
+    }
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      if (camera && renderer) {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+    });
+    
+    // Timeout for WASM loading
+    setTimeout(() => {
+      if (document.getElementById('loading').style.display !== 'none') {
+        console.error('WASM loading timeout');
+        document.getElementById('loading').innerText = 'WASM loading timeout - check console for errors';
+      }
+    }, 10000);
+    
+    console.log('About to load WASM module...');
+  </script>
+  <script async src="game.js"></script>
+</body>
+</html>
