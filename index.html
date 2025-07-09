@@ -15,6 +15,7 @@
       background: rgba(0,0,0,0.5);
       padding: 10px;
       border-radius: 5px;
+      z-index: 1000;
     }
     #crosshair {
       position: absolute;
@@ -24,6 +25,7 @@
       font-size: 20px;
       color: white;
       pointer-events: none;
+      z-index: 1000;
     }
     #minimap {
       position: absolute;
@@ -34,6 +36,7 @@
       background: rgba(0, 0, 0, 0.8);
       border: 2px solid white;
       border-radius: 10px;
+      z-index: 1000;
     }
     #healthBar {
       position: absolute;
@@ -44,6 +47,7 @@
       background: rgba(255, 0, 0, 0.3);
       border: 2px solid white;
       border-radius: 10px;
+      z-index: 1000;
     }
     #healthFill {
       width: 100%;
@@ -62,6 +66,7 @@
       background: rgba(0, 0, 0, 0.7);
       padding: 10px;
       border-radius: 5px;
+      z-index: 1000;
     }
     #discoToggle {
       position: absolute;
@@ -76,6 +81,7 @@
       font-size: 14px;
       cursor: pointer;
       transition: all 0.3s ease;
+      z-index: 1000;
     }
     #discoToggle:hover {
       background: rgba(255, 0, 255, 0.3);
@@ -93,7 +99,7 @@
 </head>
 <body>
   <div id="hud">Mode: On Foot | Score: 0</div>
-  <div id="rayTracingInfo" style="position: absolute; top: 10px; left: 300px; color: white; font-family: sans-serif; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 12px;">
+  <div id="rayTracingInfo" style="position: absolute; top: 10px; left: 300px; color: white; font-family: sans-serif; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 12px; z-index: 1000;">
     Ray Tracing: ON<br>
     Strength: 0.5<br>
     Bounces: 3<br>
@@ -124,7 +130,12 @@
     window.FilmPass = FilmPass;
   </script>
   <script>
+    console.log('Starting game initialization...');
+    
     const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x222222);
+    
+    console.log('Scene created');
     
     const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -135,6 +146,8 @@
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.4;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
+    
+    console.log('Renderer created');
     
     // Enable advanced rendering features for aggressive reflections
     renderer.physicallyCorrectLights = true;
@@ -154,6 +167,15 @@
     let bloomThreshold = 0.2;
     
     document.body.appendChild(renderer.domElement);
+    
+    // Force canvas to be visible
+    renderer.domElement.style.display = 'block';
+    renderer.domElement.style.position = 'fixed';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.zIndex = '0';
+    
+    console.log('Canvas added to DOM');
 
     const hud = document.getElementById("hud");
     const healthFill = document.getElementById("healthFill");
@@ -167,7 +189,7 @@
     // Ray tracing variables
     let rayTracingEnabled = false;
     let rayTracingStrength = 0.5;
-    let rayTracingBounces = 3;
+    let rayTracingBounces = 8;
 
     // Disco mode variables
     let discoMode = false;
@@ -556,14 +578,33 @@
       
       return new THREE.CanvasTexture(canvas);
     }
-          const baseG = 90 + combinedNoise * 30;
-          const baseB = 25 + combinedNoise * 15;
-          
-          data[index] = Math.max(0, Math.min(255, baseR));
-          data[index + 1] = Math.max(0, Math.min(255, baseG));
-          data[index + 2] = Math.max(0, Math.min(255, baseB));
-          data[index + 3] = 255;
-        }
+
+    // Create a basic ground texture
+    function createGroundTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4096;
+      canvas.height = 4096;
+      const ctx = canvas.getContext('2d');
+      
+      // Create base green ground
+      const imageData = ctx.createImageData(4096, 4096);
+      const data = imageData.data;
+      
+      for (let i = 0; i < data.length; i += 4) {
+        const x = (i / 4) % 4096;
+        const y = Math.floor((i / 4) / 4096);
+        const index = i;
+        
+        // Add some noise for texture variation
+        const noise = Math.random() * 0.3;
+        const baseR = 34 + noise * 20;
+        const baseG = 90 + noise * 30;
+        const baseB = 25 + noise * 15;
+        
+        data[index] = Math.max(0, Math.min(255, baseR));
+        data[index + 1] = Math.max(0, Math.min(255, baseG));
+        data[index + 2] = Math.max(0, Math.min(255, baseB));
+        data[index + 3] = 255;
       }
       
       ctx.putImageData(imageData, 0, 0);
@@ -962,73 +1003,6 @@
       
       return new THREE.CanvasTexture(canvas);
     }
-      
-      // Add realistic body panels with subtle variations
-      ctx.globalAlpha = 0.8;
-      const panelGradient = ctx.createLinearGradient(0, 0, 512, 512);
-      panelGradient.addColorStop(0, '#4488cc');
-      panelGradient.addColorStop(0.5, '#2266aa');
-      panelGradient.addColorStop(1, '#1155bb');
-      
-      ctx.fillStyle = panelGradient;
-      ctx.fillRect(50, 50, 412, 412);
-      
-      // Add chrome trim and details
-      ctx.globalAlpha = 1.0;
-      ctx.fillStyle = '#e8e8e8';
-      ctx.fillRect(0, 0, 512, 20);
-      ctx.fillRect(0, 492, 512, 20);
-      ctx.fillRect(0, 0, 20, 512);
-      ctx.fillRect(492, 0, 20, 512);
-      
-      // Chrome highlights
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 3, 512, 5);
-      ctx.fillRect(0, 504, 512, 5);
-      ctx.fillRect(3, 0, 5, 512);
-      ctx.fillRect(504, 0, 5, 512);
-      
-      // Add realistic reflections and highlights
-      ctx.globalAlpha = 0.6;
-      for (let i = 0; i < 20; i++) {
-        const x = 60 + i * 20;
-        const reflectGradient = ctx.createLinearGradient(x, 60, x, 452);
-        reflectGradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
-        reflectGradient.addColorStop(0.5, 'rgba(200, 230, 255, 0.4)');
-        reflectGradient.addColorStop(1, 'rgba(255, 255, 255, 0.8)');
-        
-        ctx.fillStyle = reflectGradient;
-        ctx.fillRect(x, 60, 8, 392);
-      }
-      
-      // Add door lines and panel separations
-      ctx.globalAlpha = 1.0;
-      ctx.strokeStyle = '#001144';
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(256, 60);
-      ctx.lineTo(256, 452);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(60, 256);
-      ctx.lineTo(452, 256);
-      ctx.stroke();
-      
-      // Add window reflections
-      ctx.fillStyle = '#001133';
-      ctx.fillRect(80, 80, 352, 60);
-      ctx.fillStyle = '#003366';
-      ctx.fillRect(85, 85, 342, 50);
-      
-      // Add subtle window tint gradient
-      const windowGradient = ctx.createLinearGradient(80, 80, 432, 140);
-      windowGradient.addColorStop(0, 'rgba(0, 50, 100, 0.8)');
-      windowGradient.addColorStop(1, 'rgba(0, 20, 60, 0.9)');
-      ctx.fillStyle = windowGradient;
-      ctx.fillRect(80, 80, 352, 60);
-      
-      return new THREE.CanvasTexture(canvas);
-    }
 
     // Create environment map for reflections
     function createEnvMap() {
@@ -1178,72 +1152,6 @@
       }
       
       return new THREE.CanvasTexture(canvas);
-    }
-          const baseB = 102 + normalizedDistance * 30;
-          
-          data[index] = baseR;
-          data[index + 1] = baseG;
-          data[index + 2] = baseB;
-          data[index + 3] = 255;
-        }
-      }
-      
-      ctx.putImageData(imageData, 0, 0);
-      
-      // Add advanced caustic light patterns
-      ctx.globalAlpha = 0.4;
-      ctx.globalCompositeOperation = 'lighten';
-      
-      for (let i = 0; i < 400; i++) {
-        const x = Math.random() * 2048;
-        const y = Math.random() * 2048;
-        const size = 15 + Math.random() * 40;
-        
-        const causticGradient = ctx.createRadialGradient(x, y, 0, x, y, size);
-        causticGradient.addColorStop(0, 'rgba(135, 206, 235, 0.8)');
-        causticGradient.addColorStop(0.5, 'rgba(100, 180, 220, 0.4)');
-        causticGradient.addColorStop(1, 'transparent');
-        
-        ctx.fillStyle = causticGradient;
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      
-      // Add water surface ripples
-      ctx.globalAlpha = 0.3;
-      ctx.globalCompositeOperation = 'normal';
-      
-      for (let i = 0; i < 150; i++) {
-        const x = Math.random() * 2048;
-        const y = Math.random() * 2048;
-        const radius = 8 + Math.random() * 30;
-        
-        ctx.strokeStyle = `rgba(200, 230, 255, ${0.3 + Math.random() * 0.4})`;
-        ctx.lineWidth = 1.5 + Math.random() * 2;
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-      
-      // Add surface foam and bubbles
-      ctx.globalAlpha = 0.5;
-      for (let i = 0; i < 100; i++) {
-        const x = Math.random() * 2048;
-        const y = Math.random() * 2048;
-        const size = 2 + Math.random() * 6;
-        
-        ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + Math.random() * 0.3})`;
-        ctx.beginPath();
-        ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.wrapS = THREE.RepeatWrapping;
-      texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(1, 1);
-      return texture;
     }
     
     function createWaterNormalMap() {
@@ -1579,18 +1487,13 @@
       new THREE.MeshStandardMaterial({ 
         map: grassTexture,
         normalMap: grassNormalMap,
-        roughness: 0.4,
-        metalness: 0.3,
-        normalScale: new THREE.Vector2(2.5, 2.5),
-        envMap: envMap,
-        envMapIntensity: 1.2,
-        reflectivity: 0.7,
-        transparent: false,
-        side: THREE.FrontSide,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.2,
-        emissive: 0x001100,
-        emissiveIntensity: 0.05
+        color: 0x4a8a3a,
+        roughness: 0.95,
+        metalness: 0.0,
+        bumpMap: grassTexture,
+        bumpScale: 0.02,
+        displacementMap: grassTexture,
+        displacementScale: 0.1
       })
     );
     ground.rotation.x = -Math.PI / 2;
@@ -1603,9 +1506,9 @@
       map: waterTexture,
       normalMap: waterNormalMap,
       transparent: true,
-      opacity: 0.6,
+      opacity: 1.0,
       roughness: 0.001,
-      metalness: 0.0,
+      metalness: 0.3,
       envMap: envMap,
       envMapIntensity: 4.5,
       reflectivity: 1.0,
@@ -1615,7 +1518,7 @@
       clearcoat: 1.0,
       clearcoatRoughness: 0.001,
       transmission: 0.2,
-      thickness: 0.8,
+      thickness: 1.0,
       ior: 1.33,
       emissive: 0x001122,
       emissiveIntensity: 0.1
@@ -2013,7 +1916,7 @@
         
         // Increase ray bounces with B key
         if (e.key.toLowerCase() === 'b') {
-          rayTracingBounces = Math.min(5, rayTracingBounces + 1);
+          rayTracingBounces = Math.min(16, rayTracingBounces + 1);
           updateRayTracingInfo();
         }
         
@@ -2597,7 +2500,7 @@
         renderer.shadowMap.enabled = true;
         
         // Dynamically adjust material properties for enhanced reflections
-        car.material.envMapIntensity = 2.0 + (rayTracingStrength * 1.0);
+        car.material.envMapIntensity = 2.0 + (rayTracingStrength * 2.0);
         car.material.roughness = Math.max(0.01, 0.02 - (rayTracingStrength * 0.015));
         car.material.metalness = Math.min(1.0, 0.98 + (rayTracingStrength * 0.02));
         
@@ -2606,19 +2509,28 @@
         
         // Enhance building reflections
         buildings.forEach(building => {
-          building.material.envMapIntensity = 0.6 + (rayTracingStrength * 0.4);
-          building.material.roughness = Math.max(0.2, 0.4 - (rayTracingStrength * 0.2));
+          building.material.envMapIntensity = 0.6 + (rayTracingStrength * 1.0);
+          building.material.roughness = Math.max(0.1, 0.4 - (rayTracingStrength * 0.3));
         });
         
-        // Enhanced lighting for ray tracing
-        dirLight.intensity = 2.5 + (rayTracingStrength * 0.5);
-        pointLight1.intensity = 1.5 + (rayTracingStrength * 0.5);
-        pointLight2.intensity = 1.2 + (rayTracingStrength * 0.3);
+        // Enhanced lighting for ray tracing with more bounces simulation
+        const bounceMultiplier = rayTracingBounces / 8.0;
+        dirLight.intensity = 2.5 + (rayTracingStrength * 0.5 * bounceMultiplier);
+        pointLight1.intensity = 1.5 + (rayTracingStrength * 0.5 * bounceMultiplier);
+        pointLight2.intensity = 1.2 + (rayTracingStrength * 0.3 * bounceMultiplier);
+        pointLight3.intensity = 1.8 + (rayTracingStrength * 0.4 * bounceMultiplier);
+        spotLight1.intensity = 3.0 + (rayTracingStrength * 0.8 * bounceMultiplier);
+        spotLight2.intensity = 2.5 + (rayTracingStrength * 0.6 * bounceMultiplier);
+        
+        // Add bounce lighting simulation
+        rimLight1.intensity = 1.5 + (rayTracingStrength * bounceMultiplier);
+        rimLight2.intensity = 1.2 + (rayTracingStrength * bounceMultiplier);
       } else {
         renderer.toneMappingExposure = 0.8;
         car.material.envMapIntensity = 2.0;
         car.material.roughness = 0.02;
         car.material.metalness = 0.98;
+        
         ground.material.envMapIntensity = 0.3;
         ground.material.roughness = 0.6;
         
