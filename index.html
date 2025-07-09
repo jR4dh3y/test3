@@ -1,0 +1,2686 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>GTA7 v0.5 – Car + Full Camera</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: sans-serif;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    #crosshair {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 20px;
+      color: white;
+      pointer-events: none;
+    }
+    #minimap {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 150px;
+      height: 150px;
+      background: rgba(0, 0, 0, 0.8);
+      border: 2px solid white;
+      border-radius: 10px;
+    }
+    #healthBar {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      width: 200px;
+      height: 20px;
+      background: rgba(255, 0, 0, 0.3);
+      border: 2px solid white;
+      border-radius: 10px;
+    }
+    #healthFill {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, #ff0000, #ffff00, #00ff00);
+      border-radius: 8px;
+      transition: width 0.3s ease;
+    }
+    #ammoCounter {
+      position: absolute;
+      bottom: 50px;
+      right: 20px;
+      color: white;
+      font-family: monospace;
+      font-size: 18px;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    #discoToggle {
+      position: absolute;
+      top: 120px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: 2px solid #ff00ff;
+      padding: 10px 15px;
+      border-radius: 5px;
+      font-family: sans-serif;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #discoToggle:hover {
+      background: rgba(255, 0, 255, 0.3);
+      transform: scale(1.05);
+    }
+    #discoToggle.active {
+      background: linear-gradient(45deg, #ff00ff, #00ffff, #ffff00, #ff00ff);
+      animation: discoGlow 0.5s infinite alternate;
+    }
+    @keyframes discoGlow {
+      0% { box-shadow: 0 0 10px #ff00ff; }
+      100% { box-shadow: 0 0 20px #00ffff; }
+    }
+  </style>
+</head>
+<body>
+  <div id="hud">Mode: On Foot | Score: 0</div>
+  <div id="rayTracingInfo" style="position: absolute; top: 10px; left: 300px; color: white; font-family: sans-serif; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; font-size: 12px;">
+    Ray Tracing: ON<br>
+    Strength: 0.5<br>
+    Bounces: 3<br>
+    Controls: T=Toggle, Y/U=Strength, B/N=Bounces
+  </div>
+  <button id="discoToggle">🕺 DISCO MODE</button>
+  <div id="crosshair">+</div>
+  <canvas id="minimap"></canvas>
+  <div id="healthBar">
+    <div id="healthFill"></div>
+  </div>
+  <div id="ammoCounter">AMMO: 30/90</div>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script type="module">
+    import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+    import { ShaderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/ShaderPass.js';
+    import { FXAAShader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/shaders/FXAAShader.js';
+    import { FilmPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/FilmPass.js';
+    
+    // Make these available globally
+    window.EffectComposer = EffectComposer;
+    window.RenderPass = RenderPass;
+    window.UnrealBloomPass = UnrealBloomPass;
+    window.ShaderPass = ShaderPass;
+    window.FXAAShader = FXAAShader;
+    window.FilmPass = FilmPass;
+  </script>
+  <script>
+    const scene = new THREE.Scene();
+    
+    const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.4;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    
+    // Enable advanced rendering features for aggressive reflections
+    renderer.physicallyCorrectLights = true;
+    renderer.shadowMap.autoUpdate = true;
+    renderer.gammaOutput = true;
+    renderer.gammaFactor = 2.2;
+    
+    // Enhanced renderer settings for better reflections
+    renderer.localClippingEnabled = true;
+    renderer.sortObjects = true;
+    renderer.autoClear = false;
+    
+    // Create a simple bloom-like effect with multiple render targets
+    let bloomEnabled = true;
+    let bloomStrength = 2.0;
+    let bloomRadius = 0.5;
+    let bloomThreshold = 0.2;
+    
+    document.body.appendChild(renderer.domElement);
+
+    const hud = document.getElementById("hud");
+    const healthFill = document.getElementById("healthFill");
+    const ammoCounter = document.getElementById("ammoCounter");
+    const rayTracingInfo = document.getElementById("rayTracingInfo");
+    const minimapCanvas = document.getElementById("minimap");
+    const minimapCtx = minimapCanvas.getContext("2d");
+    minimapCanvas.width = 150;
+    minimapCanvas.height = 150;
+
+    // Ray tracing variables
+    let rayTracingEnabled = false;
+    let rayTracingStrength = 0.5;
+    let rayTracingBounces = 3;
+
+    // Disco mode variables
+    let discoMode = false;
+    let discoLights = [];
+    let discoSky = null;
+    let originalSky = null;
+    let discoTime = 0;
+
+    function updateRayTracingInfo() {
+      if (rayTracingInfo) {
+        rayTracingInfo.innerHTML = `
+          Ray Tracing: ${rayTracingEnabled ? 'SIMULATED' : 'OFF'}<br>
+          Strength: ${rayTracingStrength.toFixed(1)}<br>
+          Bounces: ${rayTracingBounces}<br>
+          Controls: T=Toggle, Y/U=Strength, B/N=Bounces
+        `;
+      }
+    }
+
+    // Texture loader
+    const textureLoader = new THREE.TextureLoader();
+
+    // Create sky
+    function createSky() {
+      // Sky gradient
+      const skyGeometry = new THREE.SphereGeometry(500, 32, 32);
+      const skyMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          topColor: { value: new THREE.Color(0x87CEEB) },
+          bottomColor: { value: new THREE.Color(0xFFFFFF) },
+          offset: { value: 33 },
+          exponent: { value: 0.6 }
+        },
+        vertexShader: `
+          varying vec3 vWorldPosition;
+          void main() {
+            vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPosition.xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 topColor;
+          uniform vec3 bottomColor;
+          uniform float offset;
+          uniform float exponent;
+          varying vec3 vWorldPosition;
+          void main() {
+            float h = normalize(vWorldPosition + offset).y;
+            gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+          }
+        `,
+        side: THREE.BackSide
+      });
+      
+      const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+      scene.add(sky);
+      return sky;
+    }
+
+    // Create disco sky with colorful moving lights
+    function createDiscoSky() {
+      const skyGeometry = new THREE.SphereGeometry(500, 64, 64);
+      const skyMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          time: { value: 0 },
+          resolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+        },
+        vertexShader: `
+          varying vec2 vUv;
+          varying vec3 vPosition;
+          void main() {
+            vUv = uv;
+            vPosition = position;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: `
+          uniform float time;
+          uniform vec2 resolution;
+          varying vec2 vUv;
+          varying vec3 vPosition;
+          
+          vec3 hsv2rgb(vec3 c) {
+            vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+            vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+            return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+          }
+          
+          void main() {
+            vec2 uv = vUv;
+            vec3 pos = normalize(vPosition);
+            
+            // Create moving disco lights
+            float angle = atan(pos.z, pos.x);
+            float elevation = asin(pos.y);
+            
+            // Multiple rotating disco lights
+            float light1 = sin(angle * 3.0 + time * 2.0) * cos(elevation * 4.0 + time * 1.5);
+            float light2 = cos(angle * 5.0 - time * 1.8) * sin(elevation * 3.0 - time * 2.2);
+            float light3 = sin(angle * 7.0 + time * 2.5) * cos(elevation * 6.0 + time * 1.2);
+            
+            // Color cycling
+            float hue1 = fract(time * 0.3 + light1 * 0.5);
+            float hue2 = fract(time * 0.4 + light2 * 0.3);
+            float hue3 = fract(time * 0.5 + light3 * 0.4);
+            
+            vec3 color1 = hsv2rgb(vec3(hue1, 0.8, 0.9));
+            vec3 color2 = hsv2rgb(vec3(hue2, 0.7, 0.8));
+            vec3 color3 = hsv2rgb(vec3(hue3, 0.9, 0.7));
+            
+            // Intensity based on light patterns
+            float intensity1 = max(0.0, light1) * 0.5;
+            float intensity2 = max(0.0, light2) * 0.4;
+            float intensity3 = max(0.0, light3) * 0.3;
+            
+            // Combine colors
+            vec3 finalColor = color1 * intensity1 + color2 * intensity2 + color3 * intensity3;
+            
+            // Add base disco atmosphere
+            float baseHue = fract(time * 0.1 + pos.y * 0.2);
+            vec3 baseColor = hsv2rgb(vec3(baseHue, 0.3, 0.2));
+            
+            // Add strobing effect
+            float strobe = sin(time * 10.0) * 0.5 + 0.5;
+            finalColor += baseColor + vec3(strobe * 0.1);
+            
+            // Add sparkle effect
+            float sparkle = sin(pos.x * 100.0 + time * 5.0) * sin(pos.y * 80.0 + time * 4.0) * sin(pos.z * 120.0 + time * 6.0);
+            if (sparkle > 0.95) {
+              finalColor += vec3(1.0, 1.0, 1.0) * 0.8;
+            }
+            
+            gl_FragColor = vec4(finalColor, 1.0);
+          }
+        `,
+        side: THREE.BackSide
+      });
+      
+      const sky = new THREE.Mesh(skyGeometry, skyMaterial);
+      scene.add(sky);
+      return sky;
+    }
+
+    // Create sun
+    function createSun() {
+      const sunGeometry = new THREE.SphereGeometry(5, 32, 32);
+      const sunMaterial = new THREE.MeshBasicMaterial({ 
+        color: 0xFFFFAA,
+        emissive: 0xFFFFAA,
+        emissiveIntensity: 0.8
+      });
+      const sun = new THREE.Mesh(sunGeometry, sunMaterial);
+      sun.position.set(100, 150, 100);
+      scene.add(sun);
+      
+      // Sun glow effect
+      const glowGeometry = new THREE.SphereGeometry(8, 32, 32);
+      const glowMaterial = new THREE.ShaderMaterial({
+        uniforms: {
+          glowColor: { value: new THREE.Color(0xFFFFAA) },
+          viewVector: { value: camera.position }
+        },
+        vertexShader: `
+          uniform vec3 viewVector;
+          varying float intensity;
+          void main() {
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            vec3 actual_normal = vec3(modelMatrix * vec4(normal, 0.0));
+            intensity = pow(0.7 - dot(normalize(viewVector), actual_normal), 2.0);
+          }
+        `,
+        fragmentShader: `
+          uniform vec3 glowColor;
+          varying float intensity;
+          void main() {
+            vec3 glow = glowColor * intensity;
+            gl_FragColor = vec4(glow, 1.0);
+          }
+        `,
+        side: THREE.FrontSide,
+        blending: THREE.AdditiveBlending,
+        transparent: true
+      });
+      
+      const sunGlow = new THREE.Mesh(glowGeometry, glowMaterial);
+      sunGlow.position.copy(sun.position);
+      scene.add(sunGlow);
+      
+      return { sun, sunGlow };
+    }
+
+    // Initialize sky and sun
+    const sky = createSky();
+    originalSky = sky;
+    const { sun, sunGlow } = createSun();
+
+    // Create disco lights
+    function createDiscoLights() {
+      const lights = [];
+      const colors = [0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xffffff];
+      
+      // Create spinning disco lights
+      for (let i = 0; i < 12; i++) {
+        const light = new THREE.SpotLight(colors[i % colors.length], 5, 200, Math.PI / 6, 0.5, 1);
+        light.position.set(
+          Math.cos(i * Math.PI / 6) * 100,
+          50 + Math.sin(i * Math.PI / 3) * 20,
+          Math.sin(i * Math.PI / 6) * 100
+        );
+        light.target.position.set(0, 0, 0);
+        light.castShadow = true;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+        scene.add(light);
+        scene.add(light.target);
+        lights.push(light);
+      }
+      
+      // Add pulsing colored point lights
+      for (let i = 0; i < 6; i++) {
+        const light = new THREE.PointLight(colors[i], 8, 150);
+        light.position.set(
+          Math.cos(i * Math.PI / 3) * 80,
+          30 + Math.sin(i * Math.PI / 2) * 15,
+          Math.sin(i * Math.PI / 3) * 80
+        );
+        light.castShadow = true;
+        light.shadow.mapSize.width = 1024;
+        light.shadow.mapSize.height = 1024;
+        scene.add(light);
+        lights.push(light);
+      }
+      
+      return lights;
+    }
+
+    // Toggle disco mode
+    function toggleDiscoMode() {
+      discoMode = !discoMode;
+      const toggleButton = document.getElementById('discoToggle');
+      
+      if (discoMode) {
+        // Enable disco mode
+        if (originalSky) scene.remove(originalSky);
+        discoSky = createDiscoSky();
+        discoLights = createDiscoLights();
+        toggleButton.classList.add('active');
+        toggleButton.textContent = '🕺 DISCO ON!';
+        
+        // Adjust renderer for disco effects
+        renderer.toneMappingExposure = 1.8;
+        
+      } else {
+        // Disable disco mode
+        if (discoSky) scene.remove(discoSky);
+        scene.add(originalSky);
+        
+        // Remove disco lights
+        discoLights.forEach(light => {
+          scene.remove(light);
+          if (light.target) scene.remove(light.target);
+        });
+        discoLights = [];
+        
+        toggleButton.classList.remove('active');
+        toggleButton.textContent = '🕺 DISCO MODE';
+        
+        // Reset renderer
+        renderer.toneMappingExposure = 1.4;
+      }
+    }
+
+    // Ultra-realistic ground texture with photorealistic grass
+    function createGrassTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4096;
+      canvas.height = 4096;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-realistic grass base with complex soil layers
+      const soilGradient = ctx.createRadialGradient(2048, 2048, 0, 2048, 2048, 2048);
+      soilGradient.addColorStop(0, '#1a2e18');
+      soilGradient.addColorStop(0.2, '#2d4a2b');
+      soilGradient.addColorStop(0.4, '#3a5f38');
+      soilGradient.addColorStop(0.6, '#4a7846');
+      soilGradient.addColorStop(0.8, '#5a8a54');
+      soilGradient.addColorStop(1, '#6a9a62');
+      
+      ctx.fillStyle = soilGradient;
+      ctx.fillRect(0, 0, 4096, 4096);
+      
+      // Add ultra-detailed organic soil texture with advanced noise
+      const imageData = ctx.createImageData(4096, 4096);
+      const data = imageData.data;
+      
+      for (let y = 0; y < 4096; y++) {
+        for (let x = 0; x < 4096; x++) {
+          const index = (y * 4096 + x) * 4;
+          
+          // Multi-octave noise for ultra-realistic organic look
+          const noise1 = Math.sin(x * 0.005) * Math.cos(y * 0.005) * 0.4;
+          const noise2 = Math.sin(x * 0.02) * Math.cos(y * 0.02) * 0.3;
+          const noise3 = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 0.2;
+          const noise4 = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.1;
+          const noise5 = Math.sin(x * 0.2) * Math.cos(y * 0.2) * 0.05;
+          const combinedNoise = noise1 + noise2 + noise3 + noise4 + noise5;
+          
+          // Enhanced color variation
+          const baseR = 35 + combinedNoise * 30;
+          const baseG = 65 + combinedNoise * 40;
+          const baseB = 25 + combinedNoise * 25;
+          
+          // Add dirt patches and variations
+          const dirtNoise = Math.sin(x * 0.001) * Math.cos(y * 0.001);
+          if (dirtNoise > 0.3) {
+            data[index] = Math.min(255, baseR + 20);
+            data[index + 1] = Math.min(255, baseG - 10);
+            data[index + 2] = Math.min(255, baseB + 15);
+          } else {
+            data[index] = Math.max(0, baseR);
+            data[index + 1] = Math.max(0, baseG);
+            data[index + 2] = Math.max(0, baseB);
+          }
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add thousands of ultra-detailed grass blades
+      for (let i = 0; i < 50000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const length = 8 + Math.random() * 25;
+        const width = 1 + Math.random() * 3;
+        const angle = Math.random() * Math.PI * 2;
+        
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        
+        // Create gradient for each grass blade
+        const grassGradient = ctx.createLinearGradient(0, 0, 0, length);
+        grassGradient.addColorStop(0, `hsl(${85 + Math.random() * 25}, ${60 + Math.random() * 40}%, ${25 + Math.random() * 30}%)`);
+        grassGradient.addColorStop(0.5, `hsl(${95 + Math.random() * 20}, ${70 + Math.random() * 30}%, ${35 + Math.random() * 25}%)`);
+        grassGradient.addColorStop(1, `hsl(${105 + Math.random() * 15}, ${80 + Math.random() * 20}%, ${45 + Math.random() * 20}%)`);
+        
+        ctx.fillStyle = grassGradient;
+        ctx.fillRect(-width/2, 0, width, length);
+        
+        // Add highlights and shadows
+        ctx.fillStyle = `rgba(255, 255, 150, ${0.1 + Math.random() * 0.2})`;
+        ctx.fillRect(-width/4, 0, width/2, length/2);
+        
+        ctx.restore();
+      }
+      
+      // Add moss and small plants
+      for (let i = 0; i < 2000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const radius = 3 + Math.random() * 8;
+        
+        const mossGradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        mossGradient.addColorStop(0, `hsl(${120 + Math.random() * 30}, ${60 + Math.random() * 40}%, ${30 + Math.random() * 25}%)`);
+        mossGradient.addColorStop(1, `hsl(${140 + Math.random() * 20}, ${40 + Math.random() * 30}%, ${15 + Math.random() * 15}%)`);
+        
+        ctx.fillStyle = mossGradient;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add tiny flowers and seeds
+      for (let i = 0; i < 1000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const size = 1 + Math.random() * 3;
+        
+        ctx.fillStyle = `hsl(${Math.random() * 60 + 300}, 70%, 60%)`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+          const baseG = 90 + combinedNoise * 30;
+          const baseB = 25 + combinedNoise * 15;
+          
+          data[index] = Math.max(0, Math.min(255, baseR));
+          data[index + 1] = Math.max(0, Math.min(255, baseG));
+          data[index + 2] = Math.max(0, Math.min(255, baseB));
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add thousands of realistic grass blades
+      ctx.globalAlpha = 0.6;
+      for (let i = 0; i < 3000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const length = 4 + Math.random() * 12;
+        const width = 0.8 + Math.random() * 2;
+        const bend = (Math.random() - 0.5) * 8;
+        
+        // Varied grass colors for realism
+        const grassHue = 85 + Math.random() * 40;
+        const grassSat = 60 + Math.random() * 40;
+        const grassLight = 30 + Math.random() * 30;
+        
+        ctx.strokeStyle = `hsl(${grassHue}, ${grassSat}%, ${grassLight}%)`;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + bend, y - length * 0.6, x + bend * 0.5, y - length);
+        ctx.stroke();
+      }
+      
+      // Add clover patches and flowers
+      ctx.globalAlpha = 0.4;
+      for (let i = 0; i < 200; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const size = 3 + Math.random() * 8;
+        
+        if (Math.random() < 0.1) {
+          // Tiny flowers
+          ctx.fillStyle = `hsl(${Math.random() * 60 + 300}, 70%, 60%)`;
+        } else {
+          // Clover patches
+          ctx.fillStyle = `hsl(${Math.random() * 20 + 110}, 50%, 40%)`;
+        }
+        
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add realistic dirt patches and worn areas
+      ctx.globalAlpha = 0.3;
+      for (let i = 0; i < 80; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const size = 8 + Math.random() * 25;
+        
+        const dirtGradient = ctx.createRadialGradient(x, y, 0, x, y, size);
+        dirtGradient.addColorStop(0, '#8b6f47');
+        dirtGradient.addColorStop(0.7, '#654a35');
+        dirtGradient.addColorStop(1, 'transparent');
+        
+        ctx.fillStyle = dirtGradient;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(20, 20);
+      return texture;
+    }
+    
+    function createGrassNormalMap() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4096;
+      canvas.height = 4096;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-realistic normal map for grass with advanced surface details
+      const imageData = ctx.createImageData(4096, 4096);
+      const data = imageData.data;
+      
+      for (let y = 0; y < 4096; y++) {
+        for (let x = 0; x < 4096; x++) {
+          const index = (y * 4096 + x) * 4;
+          
+          // Create complex surface normal with multiple detail layers
+          const largeDetail = Math.sin(x * 0.01) * Math.cos(y * 0.01) * 0.5;
+          const mediumDetail = Math.sin(x * 0.04) * Math.cos(y * 0.04) * 0.4;
+          const smallDetail = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.3;
+          const microDetail = (Math.random() - 0.5) * 0.2;
+          const nanoDetail = (Math.random() - 0.5) * 0.1;
+          
+          const combinedX = (largeDetail + mediumDetail + smallDetail + microDetail + nanoDetail) * 0.4 + 0.5;
+          const combinedY = (largeDetail + mediumDetail + smallDetail + microDetail + nanoDetail) * 0.4 + 0.5;
+          const combinedZ = 0.8 + Math.random() * 0.2;
+          
+          data[index] = combinedX * 255;
+          data[index + 1] = combinedY * 255;
+          data[index + 2] = combinedZ * 255;
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(20, 20);
+      return texture;
+    }
+
+    function createPlayerTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024;
+      canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-detailed player texture with photorealistic shading and materials
+      // Body (blue shirt with advanced gradient and fabric texture)
+      const bodyGradient = ctx.createRadialGradient(512, 512, 0, 512, 512, 512);
+      bodyGradient.addColorStop(0, '#4466bb');
+      bodyGradient.addColorStop(0.3, '#3355aa');
+      bodyGradient.addColorStop(0.7, '#224499');
+      bodyGradient.addColorStop(1, '#112288');
+      ctx.fillStyle = bodyGradient;
+      ctx.fillRect(0, 0, 1024, 1024);
+      
+      // Add ultra-realistic fabric texture
+      for (let i = 0; i < 5000; i++) {
+        const x = Math.random() * 1024;
+        const y = Math.random() * 1024;
+        const intensity = Math.random() * 0.3;
+        ctx.fillStyle = `rgba(${100 + Math.random() * 155}, ${100 + Math.random() * 155}, ${200 + Math.random() * 55}, ${intensity})`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+      
+      // Shirt details with realistic seams and fabric texture
+      ctx.fillStyle = '#5577cc';
+      ctx.fillRect(80, 80, 864, 864);
+      
+      // Add fabric weave pattern
+      for (let y = 80; y < 944; y += 4) {
+        for (let x = 80; x < 944; x += 4) {
+          ctx.fillStyle = `rgba(${120 + Math.random() * 40}, ${120 + Math.random() * 40}, ${220 + Math.random() * 35}, 0.3)`;
+          ctx.fillRect(x, y, 2, 2);
+        }
+      }
+      
+      // Face area with realistic skin tones and shading
+      const faceGradient = ctx.createRadialGradient(512, 256, 0, 512, 256, 200);
+      faceGradient.addColorStop(0, '#ffddcc');
+      faceGradient.addColorStop(0.3, '#ffccbb');
+      faceGradient.addColorStop(0.7, '#eebb99');
+      faceGradient.addColorStop(1, '#ddaa88');
+      ctx.fillStyle = faceGradient;
+      ctx.fillRect(256, 128, 512, 320);
+      
+      // Add skin texture and pores
+      for (let i = 0; i < 2000; i++) {
+        const x = 256 + Math.random() * 512;
+        const y = 128 + Math.random() * 320;
+        const size = Math.random() * 2;
+        ctx.fillStyle = `rgba(${200 + Math.random() * 55}, ${150 + Math.random() * 50}, ${120 + Math.random() * 50}, 0.2)`;
+        ctx.fillRect(x, y, size, size);
+      }
+      
+      // Eyes with realistic detail
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(340, 220, 96, 64);
+      ctx.fillRect(588, 220, 96, 64);
+      
+      // Irises with color variation
+      const irisGradient = ctx.createRadialGradient(388, 252, 0, 388, 252, 32);
+      irisGradient.addColorStop(0, '#2266aa');
+      irisGradient.addColorStop(0.7, '#1155aa');
+      irisGradient.addColorStop(1, '#003388');
+      ctx.fillStyle = irisGradient;
+      ctx.fillRect(356, 236, 64, 32);
+      ctx.fillRect(604, 236, 64, 32);
+      
+      // Pupils
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(372, 244, 32, 16);
+      ctx.fillRect(620, 244, 32, 16);
+      
+      // Eye highlights
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(380, 248, 16, 8);
+      ctx.fillRect(628, 248, 16, 8);
+      
+      // Nose with realistic shading
+      const noseGradient = ctx.createLinearGradient(512, 280, 512, 340);
+      noseGradient.addColorStop(0, '#ffccbb');
+      noseGradient.addColorStop(1, '#eebb99');
+      ctx.fillStyle = noseGradient;
+      ctx.fillRect(484, 280, 56, 60);
+      
+      // Nostril details
+      ctx.fillStyle = '#cc9988';
+      ctx.fillRect(492, 320, 16, 8);
+      ctx.fillRect(516, 320, 16, 8);
+      
+      // Mouth with realistic lip texture
+      const mouthGradient = ctx.createLinearGradient(512, 360, 512, 400);
+      mouthGradient.addColorStop(0, '#dd8877');
+      mouthGradient.addColorStop(0.5, '#cc7766');
+      mouthGradient.addColorStop(1, '#bb6655');
+      ctx.fillStyle = mouthGradient;
+      ctx.fillRect(460, 360, 128, 40);
+      
+      // Hair with realistic texture and highlights
+      const hairGradient = ctx.createRadialGradient(512, 64, 0, 512, 64, 200);
+      hairGradient.addColorStop(0, '#8B4513');
+      hairGradient.addColorStop(0.5, '#654321');
+      hairGradient.addColorStop(1, '#3E2723');
+      ctx.fillStyle = hairGradient;
+      ctx.fillRect(256, 64, 512, 128);
+      
+      // Hair strands and texture
+      for (let i = 0; i < 3000; i++) {
+        const x = 256 + Math.random() * 512;
+        const y = 64 + Math.random() * 128;
+        const length = 4 + Math.random() * 12;
+        const width = 1 + Math.random() * 2;
+        
+        ctx.fillStyle = `rgba(${100 + Math.random() * 100}, ${40 + Math.random() * 60}, ${20 + Math.random() * 40}, 0.7)`;
+        ctx.fillRect(x, y, width, length);
+      }
+      
+      // Clothing details - buttons, pockets, etc.
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 6; i++) {
+        const y = 300 + i * 80;
+        ctx.fillRect(500, y, 24, 24);
+        // Button holes
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(508, y + 8, 8, 8);
+        ctx.fillStyle = '#ffffff';
+      }
+      
+      // Pocket details
+      ctx.strokeStyle = '#3355aa';
+      ctx.lineWidth = 3;
+      ctx.strokeRect(200, 400, 160, 120);
+      ctx.strokeRect(664, 400, 160, 120);
+      
+      // Collar with realistic fabric fold
+      const collarGradient = ctx.createLinearGradient(256, 200, 768, 200);
+      collarGradient.addColorStop(0, '#4466bb');
+      collarGradient.addColorStop(0.5, '#5577cc');
+      collarGradient.addColorStop(1, '#4466bb');
+      ctx.fillStyle = collarGradient;
+      ctx.fillRect(256, 200, 512, 60);
+      
+      // Add shadows and highlights for realism
+      ctx.globalAlpha = 0.3;
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(256, 400, 512, 80); // Shadow under collar
+      ctx.fillRect(80, 850, 864, 94); // Bottom shadow
+      
+      ctx.globalAlpha = 0.2;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(256, 80, 512, 40); // Top highlight
+      ctx.fillRect(80, 80, 40, 864); // Left highlight
+      
+      ctx.globalAlpha = 1.0;
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    function createCarTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-realistic metallic car paint with incredible depth
+      const baseGradient = ctx.createRadialGradient(1024, 1024, 0, 1024, 1024, 1024);
+      baseGradient.addColorStop(0, '#2a6fbb');
+      baseGradient.addColorStop(0.2, '#1a5fab');
+      baseGradient.addColorStop(0.4, '#0f4a98');
+      baseGradient.addColorStop(0.6, '#073a85');
+      baseGradient.addColorStop(0.8, '#032a72');
+      baseGradient.addColorStop(1, '#021a5f');
+      
+      ctx.fillStyle = baseGradient;
+      ctx.fillRect(0, 0, 2048, 2048);
+      
+      // Add thousands of metallic flakes for ultra-realistic effect
+      for (let i = 0; i < 10000; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = Math.random() * 3 + 0.5;
+        const intensity = Math.random() * 0.6 + 0.4;
+        
+        ctx.fillStyle = `rgba(${200 + Math.random() * 55}, ${220 + Math.random() * 35}, ${255}, ${intensity})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add micro-metallic particles for extra sparkle
+      for (let i = 0; i < 20000; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = Math.random() * 1.5;
+        
+        ctx.fillStyle = `rgba(${240 + Math.random() * 15}, ${240 + Math.random() * 15}, ${255}, ${0.3 + Math.random() * 0.4})`;
+        ctx.fillRect(x, y, size, size);
+      }
+      
+      // Add chrome-like reflective strips
+      for (let i = 0; i < 8; i++) {
+        const y = i * 256;
+        const stripGradient = ctx.createLinearGradient(0, y, 2048, y + 128);
+        stripGradient.addColorStop(0, 'rgba(255, 255, 255, 0.1)');
+        stripGradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.3)');
+        stripGradient.addColorStop(1, 'rgba(255, 255, 255, 0.1)');
+        
+        ctx.fillStyle = stripGradient;
+        ctx.fillRect(0, y, 2048, 64);
+      }
+      
+      // Add advanced surface imperfections for realism
+      const imageData = ctx.createImageData(2048, 2048);
+      const data = imageData.data;
+      
+      for (let y = 0; y < 2048; y++) {
+        for (let x = 0; x < 2048; x++) {
+          const index = (y * 2048 + x) * 4;
+          
+          // Add micro-scratches and surface variations
+          const noise1 = Math.sin(x * 0.01) * Math.cos(y * 0.01) * 0.1;
+          const noise2 = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 0.05;
+          const noise3 = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.025;
+          const combinedNoise = noise1 + noise2 + noise3;
+          
+          if (Math.abs(combinedNoise) > 0.08) {
+            data[index] = 255;     // R
+            data[index + 1] = 255; // G
+            data[index + 2] = 255; // B
+            data[index + 3] = Math.floor(Math.abs(combinedNoise) * 200); // A
+          }
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add car panel lines and details
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.lineWidth = 4;
+      
+      // Horizontal panel lines
+      for (let i = 1; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * 512);
+        ctx.lineTo(2048, i * 512);
+        ctx.stroke();
+      }
+      
+      // Vertical panel lines
+      for (let i = 1; i < 4; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * 512, 0);
+        ctx.lineTo(i * 512, 2048);
+        ctx.stroke();
+      }
+      
+      // Add door handles and trim
+      ctx.fillStyle = 'rgba(220, 220, 220, 0.8)';
+      ctx.fillRect(1800, 900, 200, 40);
+      ctx.fillRect(1800, 1100, 200, 40);
+      
+      // Add window frames with gradient
+      const windowGradient = ctx.createLinearGradient(400, 400, 1648, 600);
+      windowGradient.addColorStop(0, 'rgba(0, 50, 100, 0.9)');
+      windowGradient.addColorStop(0.5, 'rgba(0, 30, 80, 0.95)');
+      windowGradient.addColorStop(1, 'rgba(0, 20, 60, 0.98)');
+      ctx.fillStyle = windowGradient;
+      ctx.fillRect(400, 400, 1248, 300);
+      
+      // Add headlight and taillight areas
+      const headlightGradient = ctx.createRadialGradient(200, 1024, 0, 200, 1024, 150);
+      headlightGradient.addColorStop(0, 'rgba(255, 255, 200, 0.8)');
+      headlightGradient.addColorStop(1, 'rgba(255, 255, 150, 0.3)');
+      ctx.fillStyle = headlightGradient;
+      ctx.fillRect(50, 874, 300, 300);
+      
+      const taillightGradient = ctx.createRadialGradient(1848, 1024, 0, 1848, 1024, 150);
+      taillightGradient.addColorStop(0, 'rgba(255, 100, 100, 0.8)');
+      taillightGradient.addColorStop(1, 'rgba(255, 50, 50, 0.3)');
+      ctx.fillStyle = taillightGradient;
+      ctx.fillRect(1698, 874, 300, 300);
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+      
+      // Add realistic body panels with subtle variations
+      ctx.globalAlpha = 0.8;
+      const panelGradient = ctx.createLinearGradient(0, 0, 512, 512);
+      panelGradient.addColorStop(0, '#4488cc');
+      panelGradient.addColorStop(0.5, '#2266aa');
+      panelGradient.addColorStop(1, '#1155bb');
+      
+      ctx.fillStyle = panelGradient;
+      ctx.fillRect(50, 50, 412, 412);
+      
+      // Add chrome trim and details
+      ctx.globalAlpha = 1.0;
+      ctx.fillStyle = '#e8e8e8';
+      ctx.fillRect(0, 0, 512, 20);
+      ctx.fillRect(0, 492, 512, 20);
+      ctx.fillRect(0, 0, 20, 512);
+      ctx.fillRect(492, 0, 20, 512);
+      
+      // Chrome highlights
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 3, 512, 5);
+      ctx.fillRect(0, 504, 512, 5);
+      ctx.fillRect(3, 0, 5, 512);
+      ctx.fillRect(504, 0, 5, 512);
+      
+      // Add realistic reflections and highlights
+      ctx.globalAlpha = 0.6;
+      for (let i = 0; i < 20; i++) {
+        const x = 60 + i * 20;
+        const reflectGradient = ctx.createLinearGradient(x, 60, x, 452);
+        reflectGradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+        reflectGradient.addColorStop(0.5, 'rgba(200, 230, 255, 0.4)');
+        reflectGradient.addColorStop(1, 'rgba(255, 255, 255, 0.8)');
+        
+        ctx.fillStyle = reflectGradient;
+        ctx.fillRect(x, 60, 8, 392);
+      }
+      
+      // Add door lines and panel separations
+      ctx.globalAlpha = 1.0;
+      ctx.strokeStyle = '#001144';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(256, 60);
+      ctx.lineTo(256, 452);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(60, 256);
+      ctx.lineTo(452, 256);
+      ctx.stroke();
+      
+      // Add window reflections
+      ctx.fillStyle = '#001133';
+      ctx.fillRect(80, 80, 352, 60);
+      ctx.fillStyle = '#003366';
+      ctx.fillRect(85, 85, 342, 50);
+      
+      // Add subtle window tint gradient
+      const windowGradient = ctx.createLinearGradient(80, 80, 432, 140);
+      windowGradient.addColorStop(0, 'rgba(0, 50, 100, 0.8)');
+      windowGradient.addColorStop(1, 'rgba(0, 20, 60, 0.9)');
+      ctx.fillStyle = windowGradient;
+      ctx.fillRect(80, 80, 352, 60);
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // Create environment map for reflections
+    function createEnvMap() {
+      const size = 512;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      
+      // Create detailed sky gradient for reflection
+      const gradient = ctx.createLinearGradient(0, 0, 0, size);
+      gradient.addColorStop(0, '#87CEEB');
+      gradient.addColorStop(0.3, '#B0E0E6');
+      gradient.addColorStop(0.7, '#F0F8FF');
+      gradient.addColorStop(1, '#ffffff');
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+      
+      // Add detailed clouds
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      for (let i = 0; i < 30; i++) {
+        const x = Math.random() * size;
+        const y = Math.random() * size * 0.6;
+        const radius = Math.random() * 40 + 20;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add sun reflection
+      ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
+      ctx.beginPath();
+      ctx.arc(size * 0.7, size * 0.3, 30, 0, Math.PI * 2);
+      ctx.fill();
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+    
+    // Create photorealistic water texture with advanced caustics
+    function createWaterTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 4096;
+      canvas.height = 4096;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-realistic deep water base with incredible depth variations
+      const waterGradient = ctx.createRadialGradient(2048, 2048, 0, 2048, 2048, 2048);
+      waterGradient.addColorStop(0, '#0a3d56');
+      waterGradient.addColorStop(0.15, '#1a4d66');
+      waterGradient.addColorStop(0.3, '#2a5d76');
+      waterGradient.addColorStop(0.5, '#3a6d86');
+      waterGradient.addColorStop(0.7, '#2a5d76');
+      waterGradient.addColorStop(0.85, '#1a4d66');
+      waterGradient.addColorStop(1, '#0a3d56');
+      
+      ctx.fillStyle = waterGradient;
+      ctx.fillRect(0, 0, 4096, 4096);
+      
+      // Add ultra-realistic water depth shading with advanced calculations
+      const imageData = ctx.createImageData(4096, 4096);
+      const data = imageData.data;
+      
+      for (let y = 0; y < 4096; y++) {
+        for (let x = 0; x < 4096; x++) {
+          const index = (y * 4096 + x) * 4;
+          
+          // Distance from center for depth effect
+          const centerX = 2048;
+          const centerY = 2048;
+          const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+          const normalizedDistance = Math.min(distance / 2048, 1);
+          
+          // Complex multi-layer noise for realistic water movement
+          const waveNoise1 = Math.sin(x * 0.003) * Math.cos(y * 0.003) * 0.3;
+          const waveNoise2 = Math.sin(x * 0.01) * Math.cos(y * 0.01) * 0.2;
+          const waveNoise3 = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 0.1;
+          const rippleNoise = Math.sin(distance * 0.02) * 0.15;
+          const combinedNoise = waveNoise1 + waveNoise2 + waveNoise3 + rippleNoise;
+          
+          // Water depth coloring with noise influence
+          const baseR = 16 + normalizedDistance * 30 + combinedNoise * 20;
+          const baseG = 67 + normalizedDistance * 50 + combinedNoise * 30;
+          const baseB = 96 + normalizedDistance * 60 + combinedNoise * 40;
+          
+          data[index] = Math.max(0, Math.min(255, baseR));
+          data[index + 1] = Math.max(0, Math.min(255, baseG));
+          data[index + 2] = Math.max(0, Math.min(255, baseB));
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add thousands of realistic water ripples and waves
+      for (let i = 0; i < 2000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const radius = 10 + Math.random() * 50;
+        const intensity = 0.1 + Math.random() * 0.3;
+        
+        const rippleGradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+        rippleGradient.addColorStop(0, `rgba(100, 150, 200, ${intensity})`);
+        rippleGradient.addColorStop(0.5, `rgba(80, 130, 180, ${intensity * 0.7})`);
+        rippleGradient.addColorStop(1, 'transparent');
+        
+        ctx.fillStyle = rippleGradient;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add foam and bubble patterns
+      for (let i = 0; i < 5000; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const size = 1 + Math.random() * 4;
+        const opacity = 0.1 + Math.random() * 0.3;
+        
+        ctx.fillStyle = `rgba(200, 220, 255, ${opacity})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add surface tension patterns
+      for (let i = 0; i < 500; i++) {
+        const x = Math.random() * 4096;
+        const y = Math.random() * 4096;
+        const width = 20 + Math.random() * 100;
+        const height = 2 + Math.random() * 8;
+        const angle = Math.random() * Math.PI * 2;
+        
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        
+        const surfaceGradient = ctx.createLinearGradient(-width/2, 0, width/2, 0);
+        surfaceGradient.addColorStop(0, 'transparent');
+        surfaceGradient.addColorStop(0.5, 'rgba(150, 200, 255, 0.2)');
+        surfaceGradient.addColorStop(1, 'transparent');
+        
+        ctx.fillStyle = surfaceGradient;
+        ctx.fillRect(-width/2, -height/2, width, height);
+        
+        ctx.restore();
+      }
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+          const baseB = 102 + normalizedDistance * 30;
+          
+          data[index] = baseR;
+          data[index + 1] = baseG;
+          data[index + 2] = baseB;
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Add advanced caustic light patterns
+      ctx.globalAlpha = 0.4;
+      ctx.globalCompositeOperation = 'lighten';
+      
+      for (let i = 0; i < 400; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = 15 + Math.random() * 40;
+        
+        const causticGradient = ctx.createRadialGradient(x, y, 0, x, y, size);
+        causticGradient.addColorStop(0, 'rgba(135, 206, 235, 0.8)');
+        causticGradient.addColorStop(0.5, 'rgba(100, 180, 220, 0.4)');
+        causticGradient.addColorStop(1, 'transparent');
+        
+        ctx.fillStyle = causticGradient;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      // Add water surface ripples
+      ctx.globalAlpha = 0.3;
+      ctx.globalCompositeOperation = 'normal';
+      
+      for (let i = 0; i < 150; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const radius = 8 + Math.random() * 30;
+        
+        ctx.strokeStyle = `rgba(200, 230, 255, ${0.3 + Math.random() * 0.4})`;
+        ctx.lineWidth = 1.5 + Math.random() * 2;
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      
+      // Add surface foam and bubbles
+      ctx.globalAlpha = 0.5;
+      for (let i = 0; i < 100; i++) {
+        const x = Math.random() * 2048;
+        const y = Math.random() * 2048;
+        const size = 2 + Math.random() * 6;
+        
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + Math.random() * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 1);
+      return texture;
+    }
+    
+    function createWaterNormalMap() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 2048;
+      canvas.height = 2048;
+      const ctx = canvas.getContext('2d');
+      
+      // Create ultra-realistic water normal map with advanced wave simulation
+      const imageData = ctx.createImageData(2048, 2048);
+      const data = imageData.data;
+      
+      for (let y = 0; y < 2048; y++) {
+        for (let x = 0; x < 2048; x++) {
+          const index = (y * 2048 + x) * 4;
+          
+          // Create realistic water waves with multiple frequencies
+          const largeWave1 = Math.sin(x * 0.005) * Math.cos(y * 0.008) * 0.5;
+          const largeWave2 = Math.sin(x * 0.008) * Math.cos(y * 0.005) * 0.3;
+          const mediumWave = Math.sin(x * 0.02) * Math.cos(y * 0.02) * 0.2;
+          const smallWave = Math.sin(x * 0.05) * Math.cos(y * 0.05) * 0.15;
+          const microWave = Math.sin(x * 0.1) * Math.cos(y * 0.1) * 0.1;
+          
+          // Add circular ripple patterns
+          const centerX = 1024;
+          const centerY = 1024;
+          const distance = Math.sqrt((x - centerX) ** 2 + (y - centerY) ** 2);
+          const ripple = Math.sin(distance * 0.02) * 0.1;
+          
+          const combinedX = (largeWave1 + largeWave2 + mediumWave + smallWave + microWave + ripple) * 0.3 + 0.5;
+          const combinedY = (largeWave1 + largeWave2 + mediumWave + smallWave + microWave + ripple) * 0.3 + 0.5;
+          const combinedZ = 0.85 + Math.sin(x * 0.01 + y * 0.01) * 0.15;
+          
+          data[index] = combinedX * 255;
+          data[index + 1] = combinedY * 255;
+          data[index + 2] = combinedZ * 255;
+          data[index + 3] = 255;
+        }
+      }
+      
+      ctx.putImageData(imageData, 0, 0);
+      
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(1, 1);
+      return texture;
+    }
+
+    function createEnemyTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 128;
+      canvas.height = 128;
+      const ctx = canvas.getContext('2d');
+      
+      // Create "Gura Gura" shark-themed enemy texture
+      // Base body with shark-like blue/grey gradient
+      const bodyGradient = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      bodyGradient.addColorStop(0, '#5599dd');
+      bodyGradient.addColorStop(0.5, '#4488cc');
+      bodyGradient.addColorStop(1, '#2277bb');
+      ctx.fillStyle = bodyGradient;
+      ctx.fillRect(0, 0, 128, 128);
+      
+      // Add water bubble/scale texture
+      for (let i = 0; i < 200; i++) {
+        const x = Math.random() * 128;
+        const y = Math.random() * 128;
+        ctx.fillStyle = `rgba(${150 + Math.random() * 105}, ${200 + Math.random() * 55}, ${255}, 0.3)`;
+        ctx.fillRect(x, y, 1, 1);
+      }
+      
+      // Shark body with blue-white pattern
+      ctx.fillStyle = '#aaccee';
+      ctx.fillRect(8, 8, 112, 112);
+      
+      // Add shark stripes/markings
+      ctx.fillStyle = '#3366aa';
+      for (let i = 0; i < 5; i++) {
+        const y = 16 + i * 20;
+        ctx.fillRect(16, y, 96, 8);
+      }
+      
+      // White belly area
+      const bellyGradient = ctx.createRadialGradient(64, 80, 0, 64, 80, 40);
+      bellyGradient.addColorStop(0, '#ffffff');
+      bellyGradient.addColorStop(0.7, '#eeeeff');
+      bellyGradient.addColorStop(1, '#ddddff');
+      ctx.fillStyle = bellyGradient;
+      ctx.fillRect(24, 56, 80, 56);
+      
+      // Shark face area
+      const faceGradient = ctx.createRadialGradient(64, 32, 0, 64, 32, 24);
+      faceGradient.addColorStop(0, '#ffffff');
+      faceGradient.addColorStop(0.7, '#eeeeff');
+      faceGradient.addColorStop(1, '#ccddee');
+      ctx.fillStyle = faceGradient;
+      ctx.fillRect(32, 16, 64, 40);
+      
+      // Large shark eyes with blue glow
+      ctx.fillStyle = '#0066ff';
+      ctx.fillRect(40, 28, 12, 8);
+      ctx.fillRect(76, 28, 12, 8);
+      
+      // Eye highlights/reflections
+      ctx.fillStyle = '#aaccff';
+      ctx.fillRect(42, 30, 8, 4);
+      ctx.fillRect(78, 30, 8, 4);
+      
+      // Shark dorsal fin/hood
+      ctx.fillStyle = '#2266aa';
+      ctx.fillRect(32, 8, 64, 16);
+      ctx.fillStyle = '#4488cc';
+      ctx.fillRect(36, 12, 56, 8);
+      
+      // Fin details and water sparkles
+      ctx.fillStyle = '#66aaff';
+      for (let i = 0; i < 20; i++) {
+        ctx.fillRect(32 + Math.random() * 64, 8 + Math.random() * 16, 2, 1);
+      }
+      
+      // Shark fins as arms
+      const finGradient = ctx.createLinearGradient(0, 32, 32, 96);
+      finGradient.addColorStop(0, '#4488cc');
+      finGradient.addColorStop(1, '#2266aa');
+      ctx.fillStyle = finGradient;
+      ctx.fillRect(8, 32, 24, 64);
+      ctx.fillRect(96, 32, 24, 64);
+      
+      // Fin details
+      ctx.fillStyle = '#66aaee';
+      ctx.fillRect(12, 36, 16, 56);
+      ctx.fillRect(100, 36, 16, 56);
+      
+      // Shark "hands" with white tips
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(8, 80, 24, 16);
+      ctx.fillRect(96, 80, 24, 16);
+      
+      // Add some shark teeth on the face
+      ctx.fillStyle = '#ffffff';
+      for (let i = 0; i < 8; i++) {
+        const x = 36 + i * 7;
+        ctx.fillRect(x, 44, 3, 6);
+      }
+      
+      // Add "a" symbol (Atlantis/Aqua theme)
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '16px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText('A', 64, 100);
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+    
+    function createBuildingTexture() {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+      
+      // Create realistic building texture with concrete and glass
+      // Base concrete structure
+      const concreteGradient = ctx.createLinearGradient(0, 0, 512, 512);
+      concreteGradient.addColorStop(0, '#888888');
+      concreteGradient.addColorStop(0.5, '#777777');
+      concreteGradient.addColorStop(1, '#666666');
+      
+      ctx.fillStyle = concreteGradient;
+      ctx.fillRect(0, 0, 512, 512);
+      
+      // Add concrete texture
+      for (let i = 0; i < 500; i++) {
+        const x = Math.random() * 512;
+        const y = Math.random() * 512;
+        const size = Math.random() * 3 + 1;
+        ctx.fillStyle = `rgba(${100 + Math.random() * 100}, ${100 + Math.random() * 100}, ${100 + Math.random() * 100}, 0.3)`;
+        ctx.fillRect(x, y, size, size);
+      }
+      
+      // Add windows in realistic grid pattern
+      const windowSize = 48;
+      const windowSpacing = 64;
+      
+      for (let x = 0; x < 8; x++) {
+        for (let y = 0; y < 8; y++) {
+          const windowX = x * windowSpacing + 8;
+          const windowY = y * windowSpacing + 8;
+          
+          // Window frame (aluminum)
+          ctx.fillStyle = '#aaaaaa';
+          ctx.fillRect(windowX, windowY, windowSize, windowSize);
+          
+          // Window glass with realistic reflections
+          const isLit = Math.random() > 0.7;
+          if (isLit) {
+            // Lit window
+            const lightGradient = ctx.createRadialGradient(
+              windowX + windowSize/2, windowY + windowSize/2, 0,
+              windowX + windowSize/2, windowY + windowSize/2, windowSize/2
+            );
+            lightGradient.addColorStop(0, '#ffff88');
+            lightGradient.addColorStop(1, '#ffcc44');
+            ctx.fillStyle = lightGradient;
+          } else {
+            // Dark window with sky reflection
+            const reflectionGradient = ctx.createLinearGradient(
+              windowX, windowY, windowX + windowSize, windowY + windowSize
+            );
+            reflectionGradient.addColorStop(0, '#001133');
+            reflectionGradient.addColorStop(0.5, '#002244');
+            reflectionGradient.addColorStop(1, '#001133');
+            ctx.fillStyle = reflectionGradient;
+          }
+          
+          ctx.fillRect(windowX + 4, windowY + 4, windowSize - 8, windowSize - 8);
+          
+          // Window cross frame
+          ctx.fillStyle = '#999999';
+          ctx.fillRect(windowX + windowSize/2 - 2, windowY + 4, 4, windowSize - 8);
+          ctx.fillRect(windowX + 4, windowY + windowSize/2 - 2, windowSize - 8, 4);
+          
+          // Window reflections
+          if (!isLit) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.fillRect(windowX + 6, windowY + 6, windowSize/3, windowSize/4);
+          }
+        }
+      }
+      
+      // Add building details like ledges and architectural features
+      ctx.fillStyle = '#999999';
+      for (let i = 0; i < 8; i++) {
+        const y = i * 64 + 56;
+        ctx.fillRect(0, y, 512, 8);
+      }
+      
+      // Add vertical columns
+      for (let i = 0; i < 8; i++) {
+        const x = i * 64 + 56;
+        ctx.fillStyle = '#aaaaaa';
+        ctx.fillRect(x, 0, 8, 512);
+      }
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    // Create all textures
+    const grassTexture = createGrassTexture();
+    const grassNormalMap = createGrassNormalMap();
+    const playerTexture = createPlayerTexture();
+    const carTexture = createCarTexture();
+    const enemyTexture = createEnemyTexture();
+    const buildingTexture = createBuildingTexture();
+    const envMap = createEnvMap();
+    const waterTexture = createWaterTexture();
+    const waterNormalMap = createWaterNormalMap();
+
+    // Enhanced lighting system with aggressive reflections and multiple light sources
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 1.5);
+    scene.add(hemi);
+
+    // Main directional light (sun) - more intense
+    const dirLight = new THREE.DirectionalLight(0xffffff, 3.5);
+    dirLight.position.set(100, 150, 100);
+    dirLight.castShadow = true;
+    dirLight.shadow.mapSize.width = 4096;
+    dirLight.shadow.mapSize.height = 4096;
+    dirLight.shadow.camera.near = 0.5;
+    dirLight.shadow.camera.far = 800;
+    dirLight.shadow.camera.left = -200;
+    dirLight.shadow.camera.right = 200;
+    dirLight.shadow.camera.top = 200;
+    dirLight.shadow.camera.bottom = -200;
+    dirLight.shadow.bias = -0.0001;
+    dirLight.shadow.normalBias = 0.02;
+    scene.add(dirLight);
+
+    // Multiple aggressive point lights for enhanced reflections
+    const pointLight1 = new THREE.PointLight(0xffffff, 2.5, 150);
+    pointLight1.position.set(20, 35, 20);
+    pointLight1.castShadow = true;
+    pointLight1.shadow.mapSize.width = 2048;
+    pointLight1.shadow.mapSize.height = 2048;
+    scene.add(pointLight1);
+
+    const pointLight2 = new THREE.PointLight(0xff9999, 2.0, 120);
+    pointLight2.position.set(-30, 25, -20);
+    pointLight2.castShadow = true;
+    pointLight2.shadow.mapSize.width = 2048;
+    pointLight2.shadow.mapSize.height = 2048;
+    scene.add(pointLight2);
+
+    // Additional warm light for golden hour effect
+    const pointLight3 = new THREE.PointLight(0xffaa77, 1.8, 100);
+    pointLight3.position.set(0, 40, 0);
+    pointLight3.castShadow = true;
+    pointLight3.shadow.mapSize.width = 2048;
+    pointLight3.shadow.mapSize.height = 2048;
+    scene.add(pointLight3);
+
+    // New aggressive spot lights for dramatic lighting
+    const spotLight1 = new THREE.SpotLight(0xffffff, 3.0, 100, Math.PI / 4, 0.3, 1);
+    spotLight1.position.set(50, 50, 50);
+    spotLight1.castShadow = true;
+    spotLight1.shadow.mapSize.width = 2048;
+    spotLight1.shadow.mapSize.height = 2048;
+    scene.add(spotLight1);
+
+    const spotLight2 = new THREE.SpotLight(0x99bbff, 2.5, 80, Math.PI / 6, 0.2, 1);
+    spotLight2.position.set(-40, 45, -40);
+    spotLight2.castShadow = true;
+    spotLight2.shadow.mapSize.width = 2048;
+    spotLight2.shadow.mapSize.height = 2048;
+    scene.add(spotLight2);
+
+    // Additional point lights for rim lighting effects
+    const rimLight1 = new THREE.PointLight(0xaaccff, 1.5, 60);
+    rimLight1.position.set(15, 20, 15);
+    scene.add(rimLight1);
+
+    const rimLight2 = new THREE.PointLight(0xffccaa, 1.2, 50);
+    rimLight2.position.set(-15, 18, -15);
+    scene.add(rimLight2);
+
+    // Ambient fill light for better overall illumination
+    const ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    scene.add(ambientLight);
+
+    // Ground with enhanced reflective properties and shiny finish
+    const ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(1000, 1000),
+      new THREE.MeshStandardMaterial({ 
+        map: grassTexture,
+        normalMap: grassNormalMap,
+        roughness: 0.4,
+        metalness: 0.3,
+        normalScale: new THREE.Vector2(2.5, 2.5),
+        envMap: envMap,
+        envMapIntensity: 1.2,
+        reflectivity: 0.7,
+        transparent: false,
+        side: THREE.FrontSide,
+        clearcoat: 0.8,
+        clearcoatRoughness: 0.2,
+        emissive: 0x001100,
+        emissiveIntensity: 0.05
+      })
+    );
+    ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
+    scene.add(ground);
+
+    // Create stunning photorealistic water pond with aggressive reflections
+    const waterGeometry = new THREE.CircleGeometry(25, 128);
+    const waterMaterial = new THREE.MeshStandardMaterial({
+      map: waterTexture,
+      normalMap: waterNormalMap,
+      transparent: true,
+      opacity: 0.6,
+      roughness: 0.001,
+      metalness: 0.0,
+      envMap: envMap,
+      envMapIntensity: 4.5,
+      reflectivity: 1.0,
+      color: 0x1a4d66,
+      side: THREE.DoubleSide,
+      normalScale: new THREE.Vector2(4.0, 4.0),
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.001,
+      transmission: 0.2,
+      thickness: 0.8,
+      ior: 1.33,
+      emissive: 0x001122,
+      emissiveIntensity: 0.1
+    });
+    
+    const waterPond = new THREE.Mesh(waterGeometry, waterMaterial);
+    waterPond.rotation.x = -Math.PI / 2;
+    waterPond.position.set(-30, 0.05, 30);
+    scene.add(waterPond);
+
+    // Create realistic water bottom with sand/rocks
+    const waterBottomGeometry = new THREE.CircleGeometry(23, 64);
+    const waterBottomMaterial = new THREE.MeshStandardMaterial({
+      color: 0x8B7355,
+      roughness: 0.8,
+      metalness: 0.1,
+      normalScale: new THREE.Vector2(0.5, 0.5)
+    });
+    
+    const waterBottom = new THREE.Mesh(waterBottomGeometry, waterBottomMaterial);
+    waterBottom.rotation.x = -Math.PI / 2;
+    waterBottom.position.set(-30, -0.5, 30);
+    scene.add(waterBottom);
+
+    // Add enhanced underwater caustics with animation
+    const causticGeometry = new THREE.CircleGeometry(22, 64);
+    const causticMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        time: { value: 0 },
+        color: { value: new THREE.Color(0x87CEEB) },
+        intensity: { value: 0.6 }
+      },
+      vertexShader: `
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float time;
+        uniform vec3 color;
+        uniform float intensity;
+        varying vec2 vUv;
+        
+        void main() {
+          vec2 uv = vUv;
+          float caustic1 = sin(uv.x * 20.0 + time) * cos(uv.y * 20.0 + time) * 0.5 + 0.5;
+          float caustic2 = sin(uv.x * 15.0 - time * 0.7) * cos(uv.y * 15.0 - time * 0.7) * 0.3 + 0.3;
+          float caustic3 = sin(uv.x * 25.0 + time * 1.2) * cos(uv.y * 25.0 + time * 1.2) * 0.2 + 0.2;
+          
+          float combined = (caustic1 + caustic2 + caustic3) * intensity;
+          gl_FragColor = vec4(color * combined, combined * 0.8);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending
+    });
+    
+    const causticPlane = new THREE.Mesh(causticGeometry, causticMaterial);
+    causticPlane.rotation.x = -Math.PI / 2;
+    causticPlane.position.set(-30, -0.4, 30);
+    scene.add(causticPlane);
+    
+    // Add water edge foam effect
+    const foamGeometry = new THREE.RingGeometry(24, 26, 64);
+    const foamMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide
+    });
+    
+    const waterFoam = new THREE.Mesh(foamGeometry, foamMaterial);
+    waterFoam.rotation.x = -Math.PI / 2;
+    waterFoam.position.set(-30, 0.02, 30);
+    scene.add(waterFoam);
+
+    // Advanced water ripples and physics system
+    const waterRipples = [];
+    const waterParticles = [];
+    let waterTime = 0;
+    
+    function createWaterRipple(x, z, intensity = 1.0) {
+      const ripple = {
+        x: x,
+        z: z,
+        radius: 0,
+        maxRadius: 12 * intensity,
+        life: 1.0,
+        speed: 0.3 * intensity,
+        intensity: intensity
+      };
+      waterRipples.push(ripple);
+    }
+    
+    function createWaterSplash(x, z, intensity = 1.0) {
+      // Create shiny reflective splash particles
+      for (let i = 0; i < 8 * intensity; i++) {
+        const particle = new THREE.Mesh(
+          new THREE.SphereGeometry(0.03, 8, 8),
+          new THREE.MeshStandardMaterial({ 
+            color: 0x3399cc,
+            transparent: true,
+            opacity: 0.7,
+            envMap: envMap,
+            envMapIntensity: 1.5,
+            roughness: 0.1,
+            metalness: 0.3,
+            reflectivity: 0.8
+          })
+        );
+        
+        particle.position.set(x, 0.5, z);
+        
+        // Random splash velocity
+        const angle = Math.random() * Math.PI * 2;
+        const speed = Math.random() * 0.5 + 0.2;
+        const velocity = new THREE.Vector3(
+          Math.cos(angle) * speed,
+          Math.random() * 0.8 + 0.4,
+          Math.sin(angle) * speed
+        );
+        
+        particle.userData = { 
+          velocity: velocity,
+          life: 1.0,
+          gravity: -0.02
+        };
+        
+        scene.add(particle);
+        waterParticles.push(particle);
+      }
+    }
+    
+    function updateWaterPhysics() {
+      waterTime += 0.016;
+      
+      // Animate water textures with complex wave patterns
+      if (waterNormalMap) {
+        waterNormalMap.offset.x = Math.sin(waterTime * 0.2) * 0.01;
+        waterNormalMap.offset.y = Math.cos(waterTime * 0.15) * 0.01;
+      }
+      
+      if (waterTexture) {
+        waterTexture.offset.x = Math.cos(waterTime * 0.08) * 0.003;
+        waterTexture.offset.y = Math.sin(waterTime * 0.12) * 0.003;
+      }
+      
+      // Update advanced caustic animation
+      if (causticPlane && causticPlane.material.uniforms) {
+        causticPlane.material.uniforms.time.value = waterTime;
+      }
+      
+      // Animate water foam
+      if (waterFoam) {
+        waterFoam.material.opacity = 0.2 + Math.sin(waterTime * 3) * 0.1;
+      }
+      
+      // Update water ripples
+      for (let i = waterRipples.length - 1; i >= 0; i--) {
+        const ripple = waterRipples[i];
+        ripple.radius += ripple.speed;
+        ripple.life -= 0.012;
+        
+        if (ripple.life <= 0 || ripple.radius > ripple.maxRadius) {
+          waterRipples.splice(i, 1);
+        }
+      }
+      
+      // Update water particles
+      for (let i = waterParticles.length - 1; i >= 0; i--) {
+        const particle = waterParticles[i];
+        particle.position.add(particle.userData.velocity);
+        particle.userData.velocity.y += particle.userData.gravity;
+        particle.userData.life -= 0.015;
+        particle.material.opacity = particle.userData.life * 0.8;
+        
+        if (particle.userData.life <= 0 || particle.position.y < -0.3) {
+          scene.remove(particle);
+          waterParticles.splice(i, 1);
+        }
+      }
+      
+      // Create ambient water ripples
+      if (Math.random() < 0.01) {
+        const angle = Math.random() * Math.PI * 2;
+        const distance = Math.random() * 20;
+        createWaterRipple(
+          -30 + Math.cos(angle) * distance,
+          30 + Math.sin(angle) * distance,
+          0.2 + Math.random() * 0.3
+        );
+      }
+      
+      // Enhanced player/car water interaction
+      const playerWaterDistance = Math.sqrt(
+        Math.pow(player.position.x - (-30), 2) + 
+        Math.pow(player.position.z - 30, 2)
+      );
+      
+      if (playerWaterDistance < 23) {
+        // Player is near/in water
+        if (Math.random() < 0.08) {
+          createWaterRipple(
+            player.position.x + (Math.random() - 0.5) * 3,
+            player.position.z + (Math.random() - 0.5) * 3,
+            0.6
+          );
+        }
+      }
+      
+      const carWaterDistance = Math.sqrt(
+        Math.pow(car.position.x - (-30), 2) + 
+        Math.pow(car.position.z - 30, 2)
+      );
+      
+      if (carWaterDistance < 23 && inCar) {
+        // Car is near/in water
+        if (Math.random() < 0.03) {
+          createWaterRipple(
+            car.position.x + (Math.random() - 0.5) * 5,
+            car.position.z + (Math.random() - 0.5) * 5,
+            1.0
+          );
+        }
+      }
+    }
+
+    // Player with enhanced reflective and shiny material
+    const player = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 2, 1),
+      new THREE.MeshStandardMaterial({ 
+        map: playerTexture,
+        envMap: envMap,
+        envMapIntensity: 1.2,
+        roughness: 0.2,
+        metalness: 0.5,
+        reflectivity: 0.8,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.1,
+        emissive: 0x001122,
+        emissiveIntensity: 0.1
+      })
+    );
+    player.position.y = 1;
+    player.castShadow = true;
+    player.receiveShadow = true;
+    scene.add(player);
+
+    // Car with ultra-shiny chrome-like finish
+    const car = new THREE.Mesh(
+      new THREE.BoxGeometry(3, 1.5, 5),
+      new THREE.MeshStandardMaterial({ 
+        map: carTexture,
+        envMap: envMap,
+        metalness: 1.0,
+        roughness: 0.01,
+        envMapIntensity: 4.0,
+        reflectivity: 1.0,
+        clearcoat: 1.0,
+        clearcoatRoughness: 0.005,
+        clearcoatNormalScale: new THREE.Vector2(0.15, 0.15),
+        color: 0xffffff,
+        emissive: 0x111111,
+        emissiveIntensity: 0.1
+      })
+    );
+    car.position.set(10, 0.75, 0);
+    car.castShadow = true;
+    car.receiveShadow = true;
+    scene.add(car);
+
+    // Add car windows (mirror-like reflective with aggressive reflections)
+    const windowMaterial = new THREE.MeshStandardMaterial({
+      color: 0x001144,
+      transparent: true,
+      opacity: 0.1,
+      envMap: envMap,
+      envMapIntensity: 5.0,
+      metalness: 1.0,
+      roughness: 0.005,
+      reflectivity: 1.0,
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.001,
+      emissive: 0x002244,
+      emissiveIntensity: 0.2
+    });
+    
+    const frontWindow = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.8, 1.2),
+      windowMaterial
+    );
+    frontWindow.position.set(10, 1.2, 2.2);
+    frontWindow.rotation.x = -Math.PI / 12;
+    scene.add(frontWindow);
+    
+    const backWindow = new THREE.Mesh(
+      new THREE.PlaneGeometry(2.8, 1.2),
+      windowMaterial
+    );
+    backWindow.position.set(10, 1.2, -2.2);
+    backWindow.rotation.x = Math.PI / 12;
+    scene.add(backWindow);
+    
+    // Add side windows
+    const sideWindowMaterial = windowMaterial.clone();
+    sideWindowMaterial.opacity = 0.25;
+    
+    const leftWindow = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.5, 1.0),
+      sideWindowMaterial
+    );
+    leftWindow.position.set(8.5, 1.3, 0);
+    leftWindow.rotation.y = -Math.PI / 2;
+    scene.add(leftWindow);
+    
+    const rightWindow = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.5, 1.0),
+      sideWindowMaterial
+    );
+    rightWindow.position.set(11.5, 1.3, 0);
+    rightWindow.rotation.y = Math.PI / 2;
+    scene.add(rightWindow);
+
+    let inCar = false;
+    let score = 0;
+    let carRotation = 0; // Car rotation angle
+    let playerHealth = 100;
+    let ammo = 30;
+    let reserveAmmo = 90;
+    let isReloading = false;
+    let muzzleFlash = null;
+    let gameTime = 0;
+
+    // Mouse control
+    let mouseDown = false;
+    let camAngleH = 0;
+    let camAngleV = 0.4; // up/down
+    let camDist = 10;
+
+    document.addEventListener("mousedown", (e) => {
+      mouseDown = true;
+      document.body.style.cursor = 'none';
+    });
+    document.addEventListener("mouseup", (e) => {
+      mouseDown = false;
+      document.body.style.cursor = 'default';
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (mouseDown) {
+        camAngleH -= e.movementX * 0.005;
+        camAngleV += e.movementY * 0.005; // Inverted Y movement
+        camAngleV = Math.max(0.1, Math.min(Math.PI / 2.2, camAngleV)); // clamp
+      }
+    });
+    document.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      camDist = Math.max(3, Math.min(25, camDist + e.deltaY * 0.01));
+    });
+    document.addEventListener("contextmenu", (e) => e.preventDefault()); // Disable right-click menu
+
+    // Input
+    const keys = {};
+    document.addEventListener("keydown", e => {
+      keys[e.key.toLowerCase()] = true;
+      
+      // Reload weapon
+      if (e.key.toLowerCase() === 'r' && !isReloading && reserveAmmo > 0) {
+        reload();
+      }
+      
+      // Ray tracing controls (simulated)
+      if (true) {
+        // Toggle ray tracing strength with T key
+        if (e.key.toLowerCase() === 't') {
+          rayTracingEnabled = !rayTracingEnabled;
+          rayTracingStrength = rayTracingEnabled ? 0.5 : 0;
+          updateRayTracingInfo();
+        }
+        
+        // Increase ray tracing strength with Y key
+        if (e.key.toLowerCase() === 'y') {
+          rayTracingStrength = Math.min(1.0, rayTracingStrength + 0.1);
+          rayTracingEnabled = rayTracingStrength > 0;
+          updateRayTracingInfo();
+        }
+        
+        // Decrease ray tracing strength with U key
+        if (e.key.toLowerCase() === 'u') {
+          rayTracingStrength = Math.max(0.0, rayTracingStrength - 0.1);
+          rayTracingEnabled = rayTracingStrength > 0;
+          updateRayTracingInfo();
+        }
+        
+        // Increase ray bounces with B key
+        if (e.key.toLowerCase() === 'b') {
+          rayTracingBounces = Math.min(5, rayTracingBounces + 1);
+          updateRayTracingInfo();
+        }
+        
+        // Decrease ray bounces with N key
+        if (e.key.toLowerCase() === 'n') {
+          rayTracingBounces = Math.max(1, rayTracingBounces - 1);
+          updateRayTracingInfo();
+        }
+      }
+    });
+    document.addEventListener("keyup", e => keys[e.key.toLowerCase()] = false);
+
+    function reload() {
+      if (isReloading) return;
+      isReloading = true;
+      
+      setTimeout(() => {
+        const needed = 30 - ammo;
+        const toReload = Math.min(needed, reserveAmmo);
+        ammo += toReload;
+        reserveAmmo -= toReload;
+        isReloading = false;
+        updateAmmoDisplay();
+      }, 1500);
+    }
+
+    function updateAmmoDisplay() {
+      ammoCounter.textContent = `AMMO: ${ammo}/${reserveAmmo}${isReloading ? ' (RELOADING...)' : ''}`;
+    }
+
+    function updateHealthDisplay() {
+      healthFill.style.width = `${playerHealth}%`;
+    }
+
+    // Enemies (static for now)
+    const enemies = [];
+    
+    // Bullets
+    const bullets = [];
+    const explosions = [];
+    const pickups = [];
+    const buildings = [];
+
+    function spawnEnemy() {
+      const e = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 2, 1),
+        new THREE.MeshStandardMaterial({ 
+          map: enemyTexture,
+          envMap: envMap,
+          envMapIntensity: 1.5,
+          roughness: 0.2,
+          metalness: 0.4,
+          reflectivity: 0.8,
+          clearcoat: 0.9,
+          clearcoatRoughness: 0.1,
+          emissive: 0x001144,
+          emissiveIntensity: 0.2
+        })
+      );
+      e.position.set(Math.random() * 60 - 30, 1, Math.random() * 60 - 30);
+      e.health = 3;
+      e.userData = { 
+        moveSpeed: 0.02,
+        lastAttack: 0,
+        attackCooldown: 2000
+      };
+      scene.add(e);
+      enemies.push(e);
+    }
+
+    // Create buildings
+    function createBuildings() {
+      const buildingPositions = [
+        { x: 20, z: 20, width: 8, height: 12, depth: 8 },
+        { x: -30, z: 15, width: 6, height: 8, depth: 10 },
+        { x: 25, z: -25, width: 10, height: 15, depth: 6 },
+        { x: -15, z: -20, width: 7, height: 10, depth: 7 },
+        { x: 0, z: 40, width: 12, height: 18, depth: 8 }
+      ];
+      
+      buildingPositions.forEach(pos => {
+        const building = new THREE.Mesh(
+          new THREE.BoxGeometry(pos.width, pos.height, pos.depth),
+          new THREE.MeshStandardMaterial({ 
+            map: buildingTexture,
+            roughness: 0.1,
+            metalness: 0.8,
+            envMap: envMap,
+            envMapIntensity: 2.5,
+            reflectivity: 0.9,
+            clearcoat: 1.0,
+            clearcoatRoughness: 0.05,
+            emissive: 0x112233,
+            emissiveIntensity: 0.1
+          })
+        );
+        building.position.set(pos.x, pos.height / 2, pos.z);
+        building.castShadow = true;
+        building.receiveShadow = true;
+        scene.add(building);
+        buildings.push(building);
+      });
+    }
+
+    // Create health pickup with aggressive reflective finish
+    function createHealthPickup(position) {
+      const pickup = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({ 
+          color: 0x00ff00,
+          emissive: 0x006600,
+          emissiveIntensity: 0.5,
+          envMap: envMap,
+          envMapIntensity: 2.0,
+          roughness: 0.05,
+          metalness: 0.9,
+          reflectivity: 0.95,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.01
+        })
+      );
+      pickup.position.copy(position);
+      pickup.position.y = 0.5;
+      pickup.userData = { type: 'health', rotationSpeed: 0.02 };
+      scene.add(pickup);
+      pickups.push(pickup);
+    }
+
+    // Create ammo pickup with aggressive reflective finish
+    function createAmmoPickup(position) {
+      const pickup = new THREE.Mesh(
+        new THREE.BoxGeometry(0.8, 0.5, 0.8),
+        new THREE.MeshStandardMaterial({ 
+          color: 0xffff00,
+          emissive: 0x666600,
+          emissiveIntensity: 0.5,
+          envMap: envMap,
+          envMapIntensity: 2.0,
+          roughness: 0.05,
+          metalness: 0.9,
+          reflectivity: 0.95,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.01
+        })
+      );
+      pickup.position.copy(position);
+      pickup.position.y = 0.25;
+      pickup.userData = { type: 'ammo', rotationSpeed: 0.03 };
+      scene.add(pickup);
+      pickups.push(pickup);
+    }
+
+    // Create muzzle flash
+    function createMuzzleFlash() {
+      if (muzzleFlash) {
+        scene.remove(muzzleFlash);
+      }
+      
+      muzzleFlash = new THREE.Mesh(
+        new THREE.PlaneGeometry(0.5, 0.5),
+        new THREE.MeshBasicMaterial({ 
+          color: 0xffff00,
+          transparent: true,
+          opacity: 0.8
+        })
+      );
+      
+      const flashOffset = new THREE.Vector3(0, 0, -1.5).applyQuaternion(player.quaternion);
+      muzzleFlash.position.copy(player.position.clone().add(flashOffset));
+      muzzleFlash.lookAt(camera.position);
+      scene.add(muzzleFlash);
+      
+      setTimeout(() => {
+        if (muzzleFlash) {
+          scene.remove(muzzleFlash);
+          muzzleFlash = null;
+        }
+      }, 50);
+    }
+
+    // Create explosion effect with shiny particles
+    function createExplosion(position) {
+      const explosion = {
+        position: position.clone(),
+        particles: [],
+        life: 1.0
+      };
+      
+      // Create shiny reflective explosion particles
+      for (let i = 0; i < 8; i++) {
+        const particle = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 6, 6),
+          new THREE.MeshStandardMaterial({ 
+            color: new THREE.Color().setHSL(0.1, 1, 0.5 + Math.random() * 0.5),
+            transparent: true,
+            emissive: new THREE.Color().setHSL(0.1, 1, 0.3 + Math.random() * 0.3),
+            emissiveIntensity: 0.5,
+            envMap: envMap,
+            envMapIntensity: 0.8,
+            roughness: 0.2,
+            metalness: 0.6,
+            reflectivity: 0.7
+          })
+        );
+        particle.position.copy(position);
+        
+        // Random velocity
+        const velocity = new THREE.Vector3(
+          (Math.random() - 0.5) * 2,
+          Math.random() * 2,
+          (Math.random() - 0.5) * 2
+        );
+        particle.userData = { velocity };
+        
+        scene.add(particle);
+        explosion.particles.push(particle);
+      }
+      
+      explosions.push(explosion);
+    }
+
+    for (let i = 0; i < 3; i++) spawnEnemy();
+
+    // Create world objects
+    createBuildings();
+    
+    // Spawn some pickups
+    setTimeout(() => {
+      createHealthPickup(new THREE.Vector3(15, 0, 15));
+      createAmmoPickup(new THREE.Vector3(-10, 0, 10));
+      createHealthPickup(new THREE.Vector3(30, 0, -30));
+      createAmmoPickup(new THREE.Vector3(-20, 0, -15));
+    }, 2000);
+
+    document.addEventListener("click", (e) => {
+      if (!inCar && e.button === 0 && ammo > 0 && !isReloading) { // Left mouse button only
+        const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
+        const b = new THREE.Mesh(
+          new THREE.SphereGeometry(0.1, 6, 6),
+          new THREE.MeshStandardMaterial({ 
+            color: 0xffffff,
+            emissive: 0x444444,
+            emissiveIntensity: 0.2,
+            envMap: envMap,
+            envMapIntensity: 1.0,
+            roughness: 0.1,
+            metalness: 0.9,
+            reflectivity: 0.8
+          })
+        );
+        b.position.copy(player.position);
+        b.position.y += 0.5; // Shoot from chest level
+        b.userData = { dir };
+        scene.add(b);
+        bullets.push(b);
+        
+        // Decrease ammo and create muzzle flash
+        ammo--;
+        updateAmmoDisplay();
+        createMuzzleFlash();
+        
+        // Auto reload when empty
+        if (ammo === 0 && reserveAmmo > 0) {
+          setTimeout(() => reload(), 500);
+        }
+      }
+    });
+
+    function updateCamera() {
+      const target = inCar ? car : player;
+      const offset = new THREE.Vector3(
+        Math.sin(camAngleH) * camDist * Math.cos(camAngleV),
+        Math.sin(camAngleV) * camDist + 2,
+        Math.cos(camAngleH) * camDist * Math.cos(camAngleV)
+      );
+      camera.position.copy(target.position.clone().add(offset));
+      camera.lookAt(target.position);
+      
+      // Update sun glow view vector for RTX-like effect
+      sunGlow.material.uniforms.viewVector.value.copy(camera.position);
+    }
+
+    function updatePlayerMovement() {
+      const speed = 0.2;
+      let move = new THREE.Vector3();
+      if (keys["w"]) move.z -= 1;
+      if (keys["s"]) move.z += 1;
+      if (keys["a"]) move.x -= 1;
+      if (keys["d"]) move.x += 1;
+
+      if (move.length() > 0) {
+        move.normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), camAngleH);
+        player.position.add(move.multiplyScalar(speed));
+        const angle = Math.atan2(move.x, move.z);
+        player.rotation.y = angle;
+      }
+    }
+
+    function updateCarMovement() {
+      const speed = 0.3;
+      const turnSpeed = 0.05;
+      const prevPosition = car.position.clone();
+      let moved = false;
+      
+      if (keys["w"]) {
+        car.position.x -= Math.sin(carRotation) * speed;
+        car.position.z -= Math.cos(carRotation) * speed;
+        moved = true;
+      }
+      if (keys["s"]) {
+        car.position.x += Math.sin(carRotation) * speed;
+        car.position.z += Math.cos(carRotation) * speed;
+        moved = true;
+      }
+      if (keys["a"]) {
+        if (moved) carRotation -= turnSpeed;
+        else car.position.x -= speed;
+      }
+      if (keys["d"]) {
+        if (moved) carRotation += turnSpeed;
+        else car.position.x += speed;
+      }
+      
+      // Update car rotation
+      car.rotation.y = carRotation;
+
+      // Move player with car when in car
+      if (inCar) {
+        const deltaPosition = car.position.clone().sub(prevPosition);
+        player.position.add(deltaPosition);
+        player.position.y = car.position.y + 1.5; // Position player on top of car
+        player.rotation.y = carRotation; // Match car rotation
+      }
+    }
+
+    function handleInteraction() {
+      if (keys["e"]) {
+        if (!inCar && player.position.distanceTo(car.position) < 4) {
+          inCar = true;
+          // Position player on top of car
+          player.position.copy(car.position);
+          player.position.y = car.position.y + 1.5;
+          player.rotation.y = carRotation; // Match car rotation
+          hud.innerText = `Mode: In Car | Score: ${score}`;
+        } else if (inCar) {
+          inCar = false;
+          // Position player beside car when exiting
+          player.position.copy(car.position);
+          player.position.x += 3;
+          player.position.y = 1;
+          hud.innerText = `Mode: On Foot | Score: ${score}`;
+        }
+        keys["e"] = false;
+      }
+    }
+
+    function updateBullets() {
+      bullets.forEach(b => b.position.add(b.userData.dir.clone().applyAxisAngle(new THREE.Vector3(0,1,0), camAngleH).multiplyScalar(0.5)));
+
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        
+        // Remove bullets that are too far
+        if (b.position.distanceTo(player.position) > 50) {
+          scene.remove(b);
+          bullets.splice(i, 1);
+          continue;
+        }
+        
+        // Check collision with water pond
+        const waterDistance = Math.sqrt(
+          Math.pow(b.position.x - (-30), 2) + 
+          Math.pow(b.position.z - 30, 2)
+        );
+        if (waterDistance < 23 && b.position.y < 0.5) {
+          createWaterRipple(b.position.x, b.position.z, 1.5);
+          createWaterSplash(b.position.x, b.position.z, 1.2);
+          createExplosion(b.position);
+          scene.remove(b);
+          bullets.splice(i, 1);
+          continue;
+        }
+        
+        // Check collision with buildings
+        let hitBuilding = false;
+        for (let building of buildings) {
+          if (b.position.distanceTo(building.position) < 5) {
+            createExplosion(b.position);
+            scene.remove(b);
+            bullets.splice(i, 1);
+            hitBuilding = true;
+            break;
+          }
+        }
+        
+        if (hitBuilding) continue;
+        
+        for (let j = enemies.length - 1; j >= 0; j--) {
+          const e = enemies[j];
+          if (e.position.distanceTo(b.position) < 1) {
+            e.health -= 1;
+            
+            // Create explosion at hit location
+            createExplosion(b.position);
+            
+            scene.remove(b);
+            bullets.splice(i, 1);
+            if (e.health <= 0) {
+              scene.remove(e);
+              enemies.splice(j, 1);
+              
+              // Random chance to spawn pickup
+              if (Math.random() < 0.3) {
+                if (Math.random() < 0.5) {
+                  createHealthPickup(e.position);
+                } else {
+                  createAmmoPickup(e.position);
+                }
+              }
+              
+              spawnEnemy();
+              score++;
+              hud.innerText = `Mode: ${inCar ? "In Car" : "On Foot"} | Score: ${score}`;
+            }
+            break;
+          }
+        }
+      }
+    }
+
+    function updateExplosions() {
+      for (let i = explosions.length - 1; i >= 0; i--) {
+        const explosion = explosions[i];
+        explosion.life -= 0.05;
+        
+        explosion.particles.forEach(particle => {
+          particle.position.add(particle.userData.velocity.clone().multiplyScalar(0.1));
+          particle.userData.velocity.multiplyScalar(0.9); // Decay velocity
+          particle.material.opacity = explosion.life;
+        });
+        
+        if (explosion.life <= 0) {
+          explosion.particles.forEach(particle => scene.remove(particle));
+          explosions.splice(i, 1);
+        }
+      }
+    }
+
+    function updateEnemies() {
+      gameTime += 0.016; // Approximate 60fps
+      
+      enemies.forEach(enemy => {
+        const distanceToPlayer = enemy.position.distanceTo(player.position);
+        
+        // Move towards player
+        if (distanceToPlayer > 2) {
+          const direction = player.position.clone().sub(enemy.position).normalize();
+          enemy.position.add(direction.multiplyScalar(enemy.userData.moveSpeed));
+          
+          // Face player
+          const angle = Math.atan2(direction.x, direction.z);
+          enemy.rotation.y = angle;
+        }
+        
+        // Attack player if close enough
+        if (distanceToPlayer < 3 && gameTime - enemy.userData.lastAttack > enemy.userData.attackCooldown) {
+          playerHealth -= 10;
+          enemy.userData.lastAttack = gameTime;
+          updateHealthDisplay();
+          
+          // Game over check
+          if (playerHealth <= 0) {
+            alert(`Game Over! Final Score: ${score}`);
+            location.reload();
+          }
+        }
+      });
+    }
+
+    function updatePickups() {
+      for (let i = pickups.length - 1; i >= 0; i--) {
+        const pickup = pickups[i];
+        pickup.rotation.y += pickup.userData.rotationSpeed;
+        
+        // Check collision with player
+        if (pickup.position.distanceTo(player.position) < 2) {
+          if (pickup.userData.type === 'health') {
+            playerHealth = Math.min(100, playerHealth + 25);
+            updateHealthDisplay();
+          } else if (pickup.userData.type === 'ammo') {
+            reserveAmmo = Math.min(300, reserveAmmo + 30);
+            updateAmmoDisplay();
+          }
+          
+          scene.remove(pickup);
+          pickups.splice(i, 1);
+        }
+      }
+    }
+
+    function updateMinimap() {
+      const mapSize = 150;
+      const worldSize = 100;
+      const scale = mapSize / worldSize;
+      
+      // Clear minimap
+      minimapCtx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      minimapCtx.fillRect(0, 0, mapSize, mapSize);
+      
+      // Draw world border
+      minimapCtx.strokeStyle = 'white';
+      minimapCtx.lineWidth = 2;
+      minimapCtx.strokeRect(0, 0, mapSize, mapSize);
+      
+      // Draw buildings
+      minimapCtx.fillStyle = 'gray';
+      buildings.forEach(building => {
+        const x = (building.position.x + worldSize/2) * scale;
+        const z = (building.position.z + worldSize/2) * scale;
+        minimapCtx.fillRect(x - 2, z - 2, 4, 4);
+      });
+      
+      // Draw enemies
+      minimapCtx.fillStyle = 'red';
+      enemies.forEach(enemy => {
+        const x = (enemy.position.x + worldSize/2) * scale;
+        const z = (enemy.position.z + worldSize/2) * scale;
+        minimapCtx.fillRect(x - 1, z - 1, 2, 2);
+      });
+      
+      // Draw pickups
+      minimapCtx.fillStyle = 'green';
+      pickups.forEach(pickup => {
+        const x = (pickup.position.x + worldSize/2) * scale;
+        const z = (pickup.position.z + worldSize/2) * scale;
+        minimapCtx.fillRect(x - 1, z - 1, 2, 2);
+      });
+      
+      // Draw car
+      minimapCtx.fillStyle = 'blue';
+      const carX = (car.position.x + worldSize/2) * scale;
+      const carZ = (car.position.z + worldSize/2) * scale;
+      minimapCtx.fillRect(carX - 2, carZ - 2, 4, 4);
+      
+      // Draw player
+      minimapCtx.fillStyle = 'yellow';
+      const playerX = (player.position.x + worldSize/2) * scale;
+      const playerZ = (player.position.z + worldSize/2) * scale;
+      minimapCtx.fillRect(playerX - 2, playerZ - 2, 4, 4);
+      
+      // Draw player direction
+      minimapCtx.strokeStyle = 'yellow';
+      minimapCtx.lineWidth = 2;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(playerX, playerZ);
+      minimapCtx.lineTo(
+        playerX + Math.sin(player.rotation.y) * 10,
+        playerZ + Math.cos(player.rotation.y) * 10
+      );
+      minimapCtx.stroke();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      handleInteraction();
+      if (inCar) updateCarMovement();
+      else updatePlayerMovement();
+
+      updateCamera();
+      updateBullets();
+      updateExplosions();
+      updateEnemies();
+      updatePickups();
+      updateMinimap();
+      updateWaterPhysics(); // Add water physics update
+
+      // Enhanced ray tracing simulation with dynamic material adjustments
+      if (rayTracingEnabled) {
+        renderer.toneMappingExposure = 0.8 + (rayTracingStrength * 0.3);
+        renderer.shadowMap.enabled = true;
+        
+        // Dynamically adjust material properties for enhanced reflections
+        car.material.envMapIntensity = 2.0 + (rayTracingStrength * 1.0);
+        car.material.roughness = Math.max(0.01, 0.02 - (rayTracingStrength * 0.015));
+        car.material.metalness = Math.min(1.0, 0.98 + (rayTracingStrength * 0.02));
+        
+        ground.material.envMapIntensity = 0.3 + (rayTracingStrength * 0.2);
+        ground.material.roughness = Math.max(0.4, 0.6 - (rayTracingStrength * 0.2));
+        
+        // Enhance building reflections
+        buildings.forEach(building => {
+          building.material.envMapIntensity = 0.6 + (rayTracingStrength * 0.4);
+          building.material.roughness = Math.max(0.2, 0.4 - (rayTracingStrength * 0.2));
+        });
+        
+        // Enhanced lighting for ray tracing
+        dirLight.intensity = 2.5 + (rayTracingStrength * 0.5);
+        pointLight1.intensity = 1.5 + (rayTracingStrength * 0.5);
+        pointLight2.intensity = 1.2 + (rayTracingStrength * 0.3);
+      } else {
+        renderer.toneMappingExposure = 0.8;
+        car.material.envMapIntensity = 2.0;
+        car.material.roughness = 0.02;
+        car.material.metalness = 0.98;
+        ground.material.envMapIntensity = 0.3;
+        ground.material.roughness = 0.6;
+        
+        buildings.forEach(building => {
+          building.material.envMapIntensity = 0.6;
+          building.material.roughness = 0.4;
+        });
+        
+        dirLight.intensity = 3.5;
+        pointLight1.intensity = 2.5;
+        pointLight2.intensity = 2.0;
+        pointLight3.intensity = 1.8;
+        spotLight1.intensity = 3.0;
+        spotLight2.intensity = 2.5;
+        
+        // Add dynamic lighting effects
+        rimLight1.intensity = 1.5 + Math.sin(Date.now() * 0.001) * 0.3;
+        rimLight2.intensity = 1.2 + Math.cos(Date.now() * 0.0015) * 0.2;
+        
+        // Animate spot light targets for dynamic shadows
+        spotLight1.target.position.set(
+          Math.sin(Date.now() * 0.0008) * 20,
+          0,
+          Math.cos(Date.now() * 0.0008) * 20
+        );
+        spotLight2.target.position.set(
+          Math.cos(Date.now() * 0.0012) * 15,
+          0,
+          Math.sin(Date.now() * 0.0012) * 15
+        );
+      }
+
+      // Clear and render with enhanced effects
+      renderer.clear();
+      
+      // Simulate bloom effect with multiple passes
+      if (bloomEnabled) {
+        renderer.toneMappingExposure = 1.4 + Math.sin(Date.now() * 0.002) * 0.2;
+      }
+      
+      // Enhanced rendering with aggressive reflections
+      renderer.render(scene, camera);
+    }
+
+    // Initialize ray tracing simulation
+    updateRayTracingInfo();
+
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      
+      renderer.setSize(width, height);
+    });
+
+    // Disco mode toggle event listener
+    document.getElementById('discoToggle').addEventListener('click', toggleDiscoMode);
+
+    animate();
+  </script>
+</body>
+</html>
